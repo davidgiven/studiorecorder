@@ -14,6 +14,7 @@ from gi.repository import GLib, Gst
 
 from .devices import Registry, test_cameras
 from .media import Recorder
+from .desktop import DesktopCapture, initialize_x11
 
 
 class Application:
@@ -23,6 +24,7 @@ class Application:
         self.duration = duration
         self.loop = GLib.MainLoop()
         self.registry = Registry()
+        self.desktop = None
         self.recorder = None
         self.stopping = False
         self.done = False
@@ -119,6 +121,21 @@ class Application:
         if error:
             self.fail(error)
             return GLib.SOURCE_REMOVE
+        if self.test_sources:
+            return self.start_recording(cameras)
+        # A Wayland portal chooser may remain open as long as the user needs.
+        # Resume the capture startup timeout after consent, not during it.
+        self.remove_timer("startup_timer")
+        self.status("Preparing primary monitor and computer audio capture… Select your primary monitor if prompted.")
+        def desktop_ready(inputs):
+            if not self.stopping and not self.done:
+                self.startup_timer = GLib.timeout_add_seconds(30, self.startup_timeout)
+                self.start_recording(cameras + inputs)
+        self.desktop = DesktopCapture(desktop_ready, self.fail)
+        self.desktop.start()
+        return GLib.SOURCE_REMOVE
+
+    def start_recording(self, cameras):
         try:
             self.recorder = Recorder(cameras, Path.cwd(), preview=not self.headless,
                                      test_sources=self.test_sources)
@@ -290,14 +307,16 @@ class Application:
         # stopping a provider concurrently with an outstanding start().
         if self.discovery_complete:
             self.registry.stop()
+        if self.desktop:
+            self.desktop.close()
         if self.window:
             self.window.destroy()
         self.loop.quit()
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Record cameras and their audio into a timestamped MKV in the current directory. Close the window or press Ctrl-C to stop.")
-    parser.add_argument("--test-sources", action="store_true", help="Use two synthetic cameras, one microphone, and a software encoder for development only")
+    parser = argparse.ArgumentParser(description="Record cameras, screen, and computer audio into a timestamped MKV in the current directory. Close the window or press Ctrl-C to stop.")
+    parser.add_argument("--test-sources", action="store_true", help="Use synthetic cameras, screen, microphone, computer audio, and a software encoder for development only")
     parser.add_argument("--headless", action="store_true", help="Omit the preview window (requires --test-sources)")
     parser.add_argument("--duration", type=float, help="Stop after this many seconds (requires --test-sources)")
     args = parser.parse_args(argv)
@@ -305,8 +324,9 @@ def main(argv=None):
         parser.error("--headless and --duration are development options requiring --test-sources")
     if args.duration is not None and (not math.isfinite(args.duration) or args.duration <= 0):
         parser.error("--duration must be a finite positive number")
-    Gst.init(None)
     try:
+        initialize_x11()
+        Gst.init(None)
         return Application(test_sources=args.test_sources, headless=args.headless, duration=args.duration).run()
     except (RuntimeError, ValueError) as exc:
         print(f"StudioRecorder: {exc}", file=sys.stderr)

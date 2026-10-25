@@ -109,8 +109,6 @@ class Registry:
             if len(matches) > 1:
                 raise RuntimeError(f"Ambiguous audio inputs for {video.name}; source overrides are not implemented yet.")
             cameras.append(Camera(video, matches[0] if matches else None))
-        if not cameras:
-            raise RuntimeError("No cameras were discovered through PipeWire.")
         return cameras
 
     def stop(self):
@@ -137,5 +135,8 @@ class TestDevice:
 
 def test_cameras():
     audio = Source("Test microphone", TestDevice(False, 0), "test", "test-audio")
-    return [Camera(Source(f"Test camera {i + 1}", TestDevice(True, i), "test", f"test-video-{i}"), audio)
-            for i in range(2)]
+    cameras = [Camera(Source(f"Test camera {i + 1}", TestDevice(True, i), "test", f"test-video-{i}"), audio)
+               for i in range(2)]
+    screen = Source("Screen", TestDevice(True, 2), None, "desktop-screen")
+    computer_audio = Source("Computer audio", TestDevice(False, 2), None, "desktop-audio")
+    return cameras + [Camera(screen, computer_audio)]

@@ -148,6 +148,7 @@ class Recorder:
         decoder.connect("pad-added", decoded)
         record_queue = queue()
         converter = make("videoconvert")
+        scaler = make("videoscale")
         raw_caps = "video/x-raw,format=NV12"
         if self.test_sources:
             raw_caps = "video/x-raw,format=I420"
@@ -164,7 +165,7 @@ class Recorder:
         # Encoders may buffer; a queue after encoding lets the muxer interleave
         # without blocking another camera's encoder startup.
         encoded_queue = queue()
-        self.add_chain(record_queue, converter, raw_filter, encoder, parser, encoded_filter, tags, encoded_queue)
+        self.add_chain(record_queue, converter, scaler, raw_filter, encoder, parser, encoded_filter, tags, encoded_queue)
         if not tee.link(record_queue):
             raise RuntimeError("Cannot attach recording video branch")
         self.mux_track(encoded_queue, "video")

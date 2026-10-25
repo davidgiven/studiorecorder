@@ -8,7 +8,7 @@ Initial implementation milestone: provide a minimal preview window without recor
 
 StudioRecorder records independent camera and audio tracks from a Linux desktop. It discovers camera devices, attempts to associate each with its audio input, and presents all usable cameras for preview. A recording preserves every enabled source; selecting a thumbnail changes only the large preview.
 
-The first version is a local desktop application. It does not mix cameras into a program output, stream to a service, or provide editing, effects, or audio monitoring through speakers. Desktop/screen capture is a possible later source type, not part of initial device discovery.
+The first version is a local desktop application. It does not mix cameras into a program output, stream to a service, or provide editing, effects, or audio monitoring through speakers. Screen capture and computer audio are always included as input sources. X11 captures only the primary monitor directly; Wayland uses the desktop ScreenCast portal with single-monitor selection and requires the user to select their primary monitor. The portable portal API does not expose automatic primary-monitor selection. The screen has one computer-audio track captured from the default output monitor, separate from camera microphones. Screen-only sessions are supported.
 
 On launch:
 

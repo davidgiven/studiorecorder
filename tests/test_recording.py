@@ -65,11 +65,14 @@ class RecordingTests(unittest.TestCase):
             "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(files[0])]))
         video = [s for s in data["streams"] if s["codec_type"] == "video"]
         audio = [s for s in data["streams"] if s["codec_type"] == "audio"]
-        self.assertEqual(len(video), 2)
-        self.assertEqual(len(audio), 1, "Shared microphone must not be duplicated")
-        self.assertEqual([s["codec_name"] for s in video], ["h264", "h264"])
-        self.assertEqual(audio[0]["codec_name"], "pcm_f32le")
-        self.assertEqual(audio[0]["sample_rate"], "48000")
+        self.assertEqual(len(video), 3, "Both cameras and the screen must be recorded")
+        self.assertEqual(len(audio), 2, "Record computer audio once, and deduplicate the shared microphone")
+        self.assertEqual([s["codec_name"] for s in video], ["h264"] * 3)
+        for stream in audio:
+            self.assertEqual(stream["codec_name"], "pcm_f32le")
+            self.assertEqual(stream["sample_rate"], "48000")
+        self.assertTrue(any("Computer" in s["tags"].get("TITLE", "") for s in audio))
+        self.assertTrue(any("Screen" in s["tags"].get("TITLE", "") for s in video))
         self.assertGreater(float(data["format"]["duration"]), 0)
         for stream in data["streams"]:
             self.assertTrue(stream["tags"].get("TITLE"))
