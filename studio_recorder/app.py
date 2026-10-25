@@ -36,6 +36,7 @@ class Application:
         self.selected_source = None
         self.signal_sources = []
         self.meters = {}
+        self.thumbnail_details = {}
         self.window = None
         if not headless:
             self.create_window()
@@ -55,7 +56,7 @@ class Application:
         self.picture.set_can_shrink(True)
         preview_overlay = Gtk.Overlay(hexpand=True, vexpand=True)
         preview_overlay.set_child(self.picture)
-        self.fps_label = Gtk.Label(label="Target: — fps   Actual: — fps")
+        self.fps_label = Gtk.Label()
         self.fps_label.set_halign(Gtk.Align.START)
         self.fps_label.set_valign(Gtk.Align.START)
         self.fps_label.set_margin_start(8)
@@ -148,6 +149,11 @@ class Application:
             picture.set_can_shrink(True)
             overlay = Gtk.Overlay()
             overlay.set_child(picture)
+            details = Gtk.Label(label="— × — · — fps", xalign=0.5)
+            details.set_justify(Gtk.Justification.CENTER)
+            details.set_can_target(False)
+            column.append(details)
+            self.thumbnail_details[camera.source.identity] = details
             if camera.audio:
                 meter = Gtk.LevelBar(min_value=0, max_value=1)
                 meter.set_valign(Gtk.Align.END)
@@ -170,6 +176,13 @@ class Application:
 
     def update_framerates(self):
         self.fps_rates = self.recorder.preview_framerates()
+        resolutions = self.recorder.preview_resolutions()
+        for identity, label in self.thumbnail_details.items():
+            resolution = resolutions.get(identity)
+            size_text = f"{resolution[0]} × {resolution[1]}" if resolution else "— × —"
+            target, actual = self.fps_rates.get(identity, (None, None))
+            target_text = f"{target:.1f}" if target is not None else "—"
+            label.set_text(f"{size_text} · {target_text} fps")
         self.show_framerate()
         return GLib.SOURCE_CONTINUE
 

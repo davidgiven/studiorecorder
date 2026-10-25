@@ -178,6 +178,18 @@ class Recorder:
             self.previews.append((camera, sink.get_property("paintable")))
             self.preview_sinks[camera.source.identity] = sink
 
+    def preview_resolutions(self):
+        resolutions = {}
+        for identity, sink in self.preview_sinks.items():
+            negotiated = sink.get_static_pad("sink").get_current_caps()
+            if negotiated:
+                structure = negotiated.get_structure(0)
+                has_width, width = structure.get_int("width")
+                has_height, height = structure.get_int("height")
+                if has_width and has_height:
+                    resolutions[identity] = (width, height)
+        return resolutions
+
     def preview_framerates(self):
         """Sample native sink counters; no Python callback per video frame."""
         now = Gst.util_get_timestamp()
