@@ -79,7 +79,9 @@ class Recorder:
         self.pipeline = Gst.Pipeline.new("studio-recorder")
         self.previews = []
         self.preview_sinks = {}
-        self._preview_samples = {}
+        self._recording_samples = {}
+        self.recording_counters = {}
+        self.video_caps_pads = {}
         self.level_sources = {}
         self.final_path = None
         self.partial_path = None
@@ -138,6 +140,7 @@ class Recorder:
         tee = make("tee")
         self.add_chain(source, decoder)
         self.pipeline.add(tee)
+        self.video_caps_pads[camera.source.identity] = tee.get_static_pad("sink")
 
         def decoded(_decoder, pad):
             current = pad.get_current_caps() or pad.query_caps(None)
@@ -169,7 +172,11 @@ class Recorder:
             # Encoders may buffer; a queue after encoding lets the muxer interleave
             # without blocking another camera's encoder startup.
             encoded_queue = queue()
-            self.add_chain(record_queue, converter, scaler, raw_filter, encoder, parser, encoded_filter, tags, encoded_queue)
+            # AU alignment makes each native counter increment one complete
+            # encoded frame. No Python per-frame probes or handoff callbacks.
+            counter = make("identity", silent=True, signal_handoffs=False)
+            self.add_chain(record_queue, converter, scaler, raw_filter, encoder, parser, encoded_filter, tags, counter, encoded_queue)
+            self.recording_counters[camera.source.identity] = counter
             if not tee.link(record_queue):
                 raise RuntimeError("Cannot attach recording video branch")
             self.mux_track(encoded_queue, "video")
@@ -202,21 +209,23 @@ class Recorder:
                     resolutions[identity] = (width, height)
         return resolutions
 
-    def preview_framerates(self):
-        """Sample native sink counters; no Python callback per video frame."""
+    def recording_framerates(self):
+        """Capture target FPS and encoded recording FPS over the last ten seconds."""
         now = Gst.util_get_timestamp()
         rates = {}
-        for identity, sink in self.preview_sinks.items():
+        for identity, pad in self.video_caps_pads.items():
             target = None
-            negotiated = sink.get_static_pad("sink").get_current_caps()
+            negotiated = pad.get_current_caps()
             if negotiated:
                 valid, numerator, denominator = negotiated.get_structure(0).get_fraction("framerate")
                 if valid and numerator > 0 and denominator > 0:
                     target = numerator / denominator
-            stats = sink.get_property("stats")
-            rendered = stats.get_value("rendered")
-            history = self._preview_samples.setdefault(identity, RollingFramerate())
-            actual = history.update(now, rendered)
+            actual = None
+            counter = self.recording_counters.get(identity)
+            if counter is not None:
+                encoded = counter.get_property("stats").get_value("num-buffers")
+                history = self._recording_samples.setdefault(identity, RollingFramerate())
+                actual = history.update(now, encoded)
             rates[identity] = (target, actual)
         return rates
 

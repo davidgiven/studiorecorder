@@ -326,7 +326,7 @@ class Application:
         self.show_framerate()
 
     def update_framerates(self):
-        self.fps_rates = self.recorder.preview_framerates()
+        self.fps_rates = self.recorder.recording_framerates()
         resolutions = self.recorder.preview_resolutions()
         for identity, label in self.thumbnail_details.items():
             resolution = resolutions.get(identity)
@@ -341,7 +341,7 @@ class Application:
         target, actual = self.fps_rates.get(self.selected_source, (None, None))
         target_text = f"{target:.1f}" if target is not None else "—"
         actual_text = f"{actual:.1f}" if actual is not None else "—"
-        self.fps_label.set_markup(f'<span background="#202020" foreground="white">  Target: {target_text} fps   Actual: {actual_text} fps  </span>')
+        self.fps_label.set_markup(f'<span background="#202020" foreground="white">  Target: {target_text} fps   Recording: {actual_text} fps  </span>')
 
     def on_message(self, _bus, message):
         if self.done:

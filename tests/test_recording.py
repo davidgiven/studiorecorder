@@ -103,6 +103,35 @@ raise SystemExit(app.run())
     def test_timed_recording(self):
         self.verify_output(self.launch("--duration", "1"))
 
+    def test_recording_fps_measures_encoded_frames_without_preview(self):
+        code = """
+from studio_recorder.app import Application, GLib, Gst
+Gst.init(None)
+app = Application(test_sources=True, headless=True)
+sample_start = None
+def check_rates():
+    global sample_start
+    if app.state == "paused":
+        assert all(actual is None for target, actual in app.recorder.recording_framerates().values())
+        app.start_recording()
+    elif app.state == "recording":
+        rates = app.recorder.recording_framerates()
+        if sample_start is None:
+            sample_start = Gst.util_get_timestamp()
+        elif Gst.util_get_timestamp() - sample_start > Gst.SECOND:
+            assert len(rates) == 3
+            assert not app.recorder.preview_sinks
+            for target, actual in rates.values():
+                assert target == 30, rates
+                assert 25 < actual < 35, rates
+            app.on_close(None)
+            return GLib.SOURCE_REMOVE
+    return GLib.SOURCE_CONTINUE
+GLib.timeout_add(100, check_rates)
+raise SystemExit(app.run())
+"""
+        self.verify_output(self.launch(code=code))
+
     def test_synchronous_startup_error_keeps_gstreamer_diagnostic(self):
         from studio_recorder.devices import test_cameras
         from studio_recorder.media import Gst, Recorder

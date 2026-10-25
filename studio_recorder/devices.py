@@ -9,6 +9,8 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
+from .v4l2 import lock_framerate
+
 
 @dataclass
 class Source:
@@ -26,6 +28,7 @@ class Source:
             if element is None:
                 raise RuntimeError("Missing GStreamer element: v4l2src")
             element.set_property("device", self.video_path)
+            element.connect("prepare-format", lock_framerate)
         else:
             element = self.device.create_element(None)
         if element is None:
