@@ -1,0 +1,195 @@
+"""One pipeline, one multitrack Matroska writer, native preview rendering."""
+
+from datetime import datetime
+from pathlib import Path
+import os
+import uuid
+
+import gi
+
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+
+
+def make(factory, **props):
+    element = Gst.ElementFactory.make(factory)
+    if element is None:
+        raise RuntimeError(f"Missing GStreamer element: {factory}")
+    for name, value in props.items():
+        element.set_property(name.replace("_", "-"), value)
+    return element
+
+
+def caps(value):
+    return make("capsfilter", caps=Gst.Caps.from_string(value))
+
+
+def queue(preview=False):
+    return make("queue", max_size_time=2 * Gst.SECOND if not preview else 200 * Gst.MSECOND,
+                max_size_buffers=0, max_size_bytes=0, leaky=2 if preview else 0)
+
+
+def track_tags(title, comment):
+    tags = Gst.TagList.new_empty()
+    tags.set_scope(Gst.TagScope.STREAM)
+    tags.add_value(Gst.TagMergeMode.REPLACE, Gst.TAG_TITLE, title)
+    tags.add_value(Gst.TagMergeMode.REPLACE, Gst.TAG_COMMENT, comment)
+    # taginject prepends "taglist," itself; keep Gst's escaping of values.
+    return make("taginject", tags=tags.to_string().partition(",")[2].strip())
+
+
+def encoder_factory(test_sources=False):
+    if test_sources:
+        return "x264enc"
+    for factory in ("vah264enc", "vah264lpenc", "nvh264enc", "nvautogpuh264enc",
+                    "qsvh264enc", "vaapih264enc", "v4l2h264enc"):
+        if Gst.ElementFactory.find(factory):
+            return factory
+    raise RuntimeError("No hardware H.264 encoder is available. Install the GStreamer plugin and GPU driver for VA-API, NVIDIA, Quick Sync, or V4L2 encoding. Software encoding is only used with --test-sources.")
+
+
+class Recorder:
+    def __init__(self, cameras, directory, *, preview=True, test_sources=False):
+        self.pipeline = Gst.Pipeline.new("studio-recorder")
+        self.previews = []
+        self.level_sources = {}
+        self.final_path = None
+        self.partial_path = None
+        self.started = False
+        self.finished = False
+        self._requested_pads = []
+        self.encoder = encoder_factory(test_sources)
+        self.cameras = cameras
+        self.test_sources = test_sources
+        self.preview = preview
+        self.directory = Path(directory)
+
+    def add_chain(self, *elements):
+        for element in elements:
+            self.pipeline.add(element)
+        for left, right in zip(elements, elements[1:]):
+            if not left.link(right):
+                raise RuntimeError(f"Cannot link {left.name} to {right.name}")
+
+    def mux_track(self, tail, kind):
+        pad = self.mux.request_pad_simple(f"{kind}_%u")
+        if pad is None or tail.get_static_pad("src").link(pad) != Gst.PadLinkReturn.OK:
+            raise RuntimeError(f"Cannot attach {kind} track to Matroska muxer")
+        self._requested_pads.append(pad)
+
+    def build(self):
+        if not self.cameras:
+            raise RuntimeError("Cannot record without cameras")
+        if self.preview and not Gst.ElementFactory.find("gtk4paintablesink"):
+            raise RuntimeError("Missing gtk4paintablesink. Install the GStreamer GTK 4 plugin (gst-plugin-gtk4).")
+        # Reserve exclusively; even concurrent launches must not overwrite output.
+        stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S_%f%z")
+        self.final_path = self.directory / f"StudioRecorder_{stamp}_{uuid.uuid4().hex[:8]}.mkv"
+        self.partial_path = self.final_path.with_suffix(".mkv.partial")
+        with self.partial_path.open("xb"):
+            pass
+        self.mux = make("matroskamux", writing_app="StudioRecorder", offset_to_zero=True)
+        self.sink = make("filesink", location=str(self.partial_path), sync=False)
+        self.add_chain(self.mux, self.sink)
+        audio_inputs = {}
+        for camera in self.cameras:
+            self.add_video(camera)
+            if camera.audio:
+                audio_inputs[camera.audio.identity] = camera.audio
+        for audio in audio_inputs.values():
+            associated = [c.source.name for c in self.cameras
+                          if c.audio and c.audio.identity == audio.identity]
+            self.add_audio(audio, associated)
+
+    def add_video(self, camera):
+        source = camera.source.create_element()
+        decoder = make("decodebin")
+        tee = make("tee")
+        self.add_chain(source, decoder)
+        self.pipeline.add(tee)
+
+        def decoded(_decoder, pad):
+            current = pad.get_current_caps() or pad.query_caps(None)
+            if current and current.to_string().startswith("video/x-raw"):
+                target = tee.get_static_pad("sink")
+                if not target.is_linked() and pad.link(target) != Gst.PadLinkReturn.OK:
+                    structure = Gst.Structure.new_empty("studio-recorder-error")
+                    structure.set_value("message", f"Cannot link decoded video for {camera.source.name}")
+                    self.pipeline.post_message(Gst.Message.new_application(self.pipeline, structure))
+
+        decoder.connect("pad-added", decoded)
+        record_queue = queue()
+        converter = make("videoconvert")
+        raw_caps = "video/x-raw,format=NV12"
+        if self.test_sources:
+            raw_caps = "video/x-raw,format=I420"
+        raw_filter = caps(raw_caps)
+        encoder = make(self.encoder)
+        if self.test_sources:
+            encoder.set_property("tune", "zerolatency")
+            encoder.set_property("speed-preset", "ultrafast")
+        elif encoder.find_property("bitrate"):
+            encoder.set_property("bitrate", 8000)
+        parser = make("h264parse")
+        encoded_filter = caps("video/x-h264,stream-format=avc,alignment=au")
+        tags = track_tags(camera.source.name, f"Video source: {camera.source.identity}; audio: {camera.audio.name if camera.audio else 'none'}")
+        # Encoders may buffer; a queue after encoding lets the muxer interleave
+        # without blocking another camera's encoder startup.
+        encoded_queue = queue()
+        self.add_chain(record_queue, converter, raw_filter, encoder, parser, encoded_filter, tags, encoded_queue)
+        if not tee.link(record_queue):
+            raise RuntimeError("Cannot attach recording video branch")
+        self.mux_track(encoded_queue, "video")
+        if self.preview:
+            preview_queue, preview_converter = queue(True), make("videoconvert")
+            sink = make("gtk4paintablesink", sync=False)
+            sink.set_property("async", False)
+            self.add_chain(preview_queue, preview_converter, sink)
+            if not tee.link(preview_queue):
+                raise RuntimeError("Cannot attach preview")
+            self.previews.append((camera, sink.get_property("paintable")))
+
+    def add_audio(self, source_info, cameras):
+        source = source_info.create_element()
+        converter, resampler = make("audioconvert"), make("audioresample")
+        raw_filter = caps("audio/x-raw,format=F32LE,layout=interleaved,rate=48000")
+        meter = make("level", interval=50 * Gst.MSECOND, post_messages=True)
+        tags = track_tags(source_info.name, f"Audio source: {source_info.identity}; cameras: {', '.join(cameras)}")
+        audio_queue = queue()
+        self.add_chain(source, converter, resampler, raw_filter, meter, tags, audio_queue)
+        self.level_sources[meter.name] = source_info.identity
+        self.mux_track(audio_queue, "audio")
+
+    def start(self):
+        result = self.pipeline.set_state(Gst.State.PLAYING)
+        self.started = result != Gst.StateChangeReturn.FAILURE
+        if not self.started:
+            # A synchronous failure precedes dispatch of the GLib bus watch.
+            # Preserve the useful errors before application cleanup flushes it.
+            errors = []
+            bus = self.pipeline.get_bus()
+            while (message := bus.pop_filtered(Gst.MessageType.ERROR)) is not None:
+                error, debug = message.parse_error()
+                detail = f"{message.src.get_path_string()}: {error.message}"
+                if debug:
+                    detail += f"\n{debug}"
+                errors.append(detail)
+            detail = "\n".join(errors) or "No GStreamer error was posted; rerun with GST_DEBUG=2 for driver and negotiation diagnostics."
+            raise RuntimeError(f"Capture pipeline could not start (encoder: {self.encoder}):\n{detail}")
+
+    def stop(self):
+        # There is no ongoing preview after this skeleton stops: EOS can drain
+        # the whole graph. The shared muxer waits for EOS from every input.
+        return self.pipeline.send_event(Gst.Event.new_eos())
+
+    def close(self, finalized=False):
+        self.pipeline.set_state(Gst.State.NULL)
+        for pad in self._requested_pads:
+            self.mux.release_request_pad(pad)
+        self._requested_pads.clear()
+        if finalized and self.partial_path:
+            # hard link creates the final name without replacing any existing
+            # file, then removes only this take's temporary name.
+            os.link(self.partial_path, self.final_path)
+            self.partial_path.unlink()
+        self.finished = True
