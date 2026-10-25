@@ -10,25 +10,41 @@ python3 -m studio_recorder
 
 It discovers cameras through PipeWire, matches microphones using physical USB identity, and previews every discovered camera and its associated audio, plus primary-monitor capture and computer audio. It starts stopped and creates no output until Play is pressed. A screen-only session works even without a webcam. Physical V4L2 webcams are opened directly through `v4l2src` using their advertised device path; other camera types and audio inputs use their provider's capture element. It writes one timestamped `StudioRecorder_*.mkv` in the current directory, containing independent H.264 video tracks and deduplicated, uncompressed float32 PCM audio tracks. Track names/comments identify sources and audio associations.
 
-The window shows a selected source, clickable thumbnails (including Screen), and audio meters. Below each source name, an audio dropdown lists discovered input devices, Computer audio, and No audio. It is enabled only while paused; changing it restarts the live preview and updates the meter and next take. Assignments last for the current application run. Shared inputs are still recorded only once. Computer audio remains a required independent track even when the screen is assigned another input or No audio. Each preview button shows its negotiated capture resolution and target FPS, above its thumbnail image. These summaries update every half-second. The large preview shows the selected source's target FPS and actual recording FPS in a top-left overlay. Recording FPS counts complete encoded video frames after the H.264 parser, averaged over the last ten seconds and sampled every half-second; it does not count preview frames. While paused, recording FPS shows a dash. During startup the average uses the elapsed sampling time until ten seconds are available. Unknown rates display as a dash; a stalled preview gradually falls to zero as its last frames leave the window. A bar between the main preview and thumbnails contains Play and Stop buttons. While stopped, prominent red PAUSED text is shown and live previews/meters remain active. Play creates a new timestamped MKV and shows elapsed time as HH:MM:SS. Stop drains, finalizes, and closes that take, then returns to PAUSED; Play is disabled until finalization and preview preparation finish. Capture pipelines are reopened at these transitions, so previews can briefly restart. Close the window, press Ctrl-C in the terminal, or send SIGTERM to exit, finalizing an active take first. The application keeps its event loop alive while EOS drains the pipeline and finalizes the MKV, then exits. Output is named `.mkv.partial` until finalization succeeds; interrupted or failed finalization preserves that file and reports a nonzero exit status. SIGKILL cannot finalize a recording.
+## Preview and recording controls
+
+The window shows a large selected preview, clickable thumbnail buttons (including Screen), and audio meters. Each button has a centered capture-resolution/target-FPS summary above its image and the source name below. Clicking it selects the large preview without changing the recording.
+
+An audio dropdown below each source name offers discovered inputs, Computer audio, and No audio. It is enabled only while paused. Changing it rebuilds preview, updates the meter, and applies to subsequent takes; dropdowns become available again when preview is ready. Assignments last for the current run and shared audio inputs are recorded only once. Computer audio remains an independent required track even if the screen is assigned another input or No audio.
+
+The main preview's top-left overlay shows target FPS and actual **recording** FPS. Recording FPS counts complete encoded video frames after the H.264 parser, averaged over the last ten seconds and refreshed every half-second. It is independent of preview FPS and shows a dash while paused. During warmup it averages over available sampling time. If encoded output stalls, the rate gradually falls to zero as earlier frames leave the window.
+
+The bar between the main preview and thumbnails contains Play and Stop:
+
+- Stopped: prominent red **PAUSED** text, live previews/meters, and no output file.
+- Play: create a new timestamped MKV and show elapsed time as HH:MM:SS once the pipeline is running.
+- Stop: drain, finalize, and close that take, then return to PAUSED. Play and audio selection stay disabled until finalization and preview preparation finish.
+
+Capture pipelines reopen at each recording transition or audio change, so previews can briefly restart. Stop does not exit the application. Close the window, press Ctrl-C, or send SIGTERM to exit; an active take finalizes first. Exiting while stopped creates no recording file.
+
+Output has a `.mkv.partial` suffix until finalization succeeds. Publishing the final filename uses a hard link followed by removal of the temporary name, so the output filesystem must support hard links. Existing recordings are never overwritten. Failed finalization preserves incomplete output and reports a nonzero exit status. SIGKILL cannot finalize a recording, and partial files are not guaranteed recoverable.
 
 ## Dependencies
 
 Use the distribution's Python 3.11+ and install matching system packages for:
 
 - PyGObject (`gi`), GTK 4.12+, and GStreamer 1.24+ introspection bindings.
-- GStreamer core/base/good/bad plugins, including PipeWire, `decodebin`, `videoconvert`, `videoscale`, `audioconvert`, `audioresample`, `level`, `taginject`, `h264parse`, and `matroskamux`.
+- GStreamer core/base/good/bad plugins, including PipeWire, `identity`, `decodebin`, `videoconvert`, `videoscale`, `audioconvert`, `audioresample`, `level`, `taginject`, `h264parse`, and `matroskamux`.
 - The GTK 4 GStreamer sink, `gtk4paintablesink` (often packaged as `gst-plugin-gtk4`). GTK 3's `gtksink` is a different plugin.
 - A hardware H.264 encoder and its working driver: VA-API (`vah264enc`/`vah264lpenc`), NVIDIA (`nvh264enc`/`nvautogpuh264enc`), Quick Sync (`qsvh264enc`), legacy VA-API, or V4L2.
 - A running desktop PipeWire service with access to the cameras and audio inputs.
 - For computer audio: `pulsesrc` and a PulseAudio-compatible server (normally `pipewire-pulse`). It captures the default output monitor, not the default microphone.
 - For X11 screen capture: `ximagesrc`, libX11, and `xrandr`. Only the primary monitor is captured, including its pointer. With multiple monitors and no configured primary, startup fails instead of recording the entire desktop.
-- For Wayland screen capture: `xdg-desktop-portal` with the desktop's ScreenCast backend. The system screen-sharing chooser is shown before recording starts; select your primary monitor; only one monitor can be selected. The portable portal API cannot automatically identify or select the primary monitor. Cancelling or denying consent aborts startup. There is no automatic fallback to recording an Xwayland window.
+- For Wayland screen capture: `xdg-desktop-portal` with the desktop's ScreenCast backend. The system screen-sharing chooser appears during preview setup. Select your primary monitor; only one monitor can be selected. The portable portal API cannot automatically identify or select the primary monitor. Cancelling or denying consent aborts startup. There is no automatic fallback to recording an Xwayland window.
 - The GStreamer V4L2 plugin and read/write access to `/dev/video*` for physical webcams.
 
 Distribution package names vary. Install PyGObject and media dependencies through system packages; `pip` alone does not supply GTK, GStreamer plugins, or hardware drivers. An optional `pip install -e . --no-deps` installs the `studio-recorder` command when the system dependencies are already available.
 
-Check individual elements with `gst-inspect-1.0 gtk4paintablesink` or `gst-inspect-1.0 vah264enc`. Finding an encoder plugin does not guarantee the driver can allocate every requested encoder session; startup reports negotiation/allocation failures. There is no automatic software fallback in normal operation.
+Check individual elements with `gst-inspect-1.0 gtk4paintablesink` or `gst-inspect-1.0 vah264enc`. Finding an encoder plugin does not guarantee the driver can allocate every requested encoder session; starting a take reports negotiation/allocation failures. Preview-only mode does not allocate a hardware encoder. There is no automatic software fallback in normal operation.
 
 ## Development checks
 
@@ -39,7 +55,9 @@ python3 -m studio_recorder --test-sources --headless --duration 3
 python3 -m unittest discover -s tests -v
 ```
 
-The integration tests additionally require `ffprobe` and `ffmpeg`. They verify one MKV containing both camera tracks, the screen track, and two float32 audio tracks, embedded identification tags, successful decoding of all tracks, stopped startup without output files, separate files across repeated Play/Stop cycles, and finalization through Stop, Ctrl-C, and the window-close handler. A desktop smoke test is still needed for preview rendering and real hardware capture.
+The suite currently contains 27 tests. Media integration tests require `ffprobe` and `ffmpeg`; without them, those checks are skipped. They inspect and decode the camera/screen video and float32 audio tracks, check embedded identification tags, verify stopped startup without files and separate files across takes, exercise paused-only audio selection and busy-preview scheduling, and confirm post-encoding FPS measurement without preview. Other tests cover device routing, primary-monitor selection, mocked portal behavior, rolling-average boundaries, and camera frame-rate locking/fallbacks.
+
+Real X11 smoke tests have exercised a C920 webcam, primary-monitor capture, webcam audio, stereo computer audio, NVIDIA H.264, Play/Stop cycles, and audio switching. With camera frame-rate locking enabled, the final four seconds of a test file measured 30.0 FPS after exposure settled. Real Wayland capture, additional hardware encoder backends, and long-duration/multi-camera operation still need validation.
 
 ## Current scope
 

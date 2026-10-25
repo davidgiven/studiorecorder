@@ -1,163 +1,132 @@
 # StudioRecorder design
 
-Status: initial proposal. Requirements come from [AGENTS.md](AGENTS.md); choices below are provisional until implementation validates them on Linux hardware.
+This document describes the current implementation and identifies remaining work separately. [AGENTS.md](AGENTS.md) gives the project requirements; [README.md](README.md) covers running the application and dependencies.
 
-Current implementation milestone: start with live previews and recording stopped. A Play/Stop bar between the main preview and thumbnails shows prominent red PAUSED text while stopped and elapsed time while recording. Every Play creates a new timestamped MKV; every Stop drains and finalizes that file before returning to preview. Closing the window or receiving Ctrl-C/SIGTERM finalizes an active take and exits. Audio dropdowns below source names allow assignments (including No audio) only while paused, with discovered inputs and Computer audio available. Assignments persist across takes for the current run; computer audio remains an independent required input. The initial implementation rebuilds the capture pipeline at each transition or audio assignment change, so previews may briefly restart. Continuous capture with dynamic recording branches, described below, remains a later optimization. See [README.md](README.md) for implemented scope and dependencies.
+## Current behavior
 
-## Scope and user experience
+StudioRecorder is a local Linux multitrack recorder implemented in Python with PyGObject, GTK 4, GLib, and GStreamer. Capture, decoding, conversion, scaling, hardware encoding, metering, and muxing run in native GStreamer elements. Python coordinates devices, pipeline lifecycle, and UI updates; it does not process individual video frames or audio samples.
 
-StudioRecorder records independent camera and audio tracks from a Linux desktop. It discovers camera devices, attempts to associate each with its audio input, and presents all usable cameras for preview. A recording preserves every enabled source; selecting a thumbnail changes only the large preview.
+The application starts stopped, with live camera and screen previews and audio meters. No recording file is created until Play is pressed. A control bar between the main preview and thumbnails contains Play/Stop and prominent red PAUSED text, replaced by HH:MM:SS elapsed time during recording. Each Play creates a separate timestamped MKV in the working directory. Stop drains and closes that take before returning to live preview. Controls prevent overlapping take transitions.
 
-The first version is a local desktop application. It does not mix cameras into a program output, stream to a service, or provide editing, effects, or audio monitoring through speakers. Screen capture and computer audio are always included as input sources. X11 captures only the primary monitor directly; Wayland uses the desktop ScreenCast portal with single-monitor selection and requires the user to select their primary monitor. The portable portal API does not expose automatic primary-monitor selection. The screen has one computer-audio track captured from the default output monitor, separate from camera microphones. Screen-only sessions are supported.
+The large preview displays the selected source. Clicking a thumbnail changes only the displayed source, including during recording. Each preview button has a centered resolution/target-FPS summary above the image and its source name below the image. An audio dropdown beneath the button selects a discovered input, Computer audio, or No audio. Dropdowns are enabled only while paused. Assignments survive pipeline rebuilds and subsequent takes within the current run, but are not saved across application launches.
 
-On launch:
-
-1. Discover cameras and audio inputs, restore saved device choices, and show live thumbnails as devices become ready.
-2. Select the first ready camera for the large preview.
-3. Show the proposed output MKV path, recording format, enabled sources, and any unresolved audio associations.
-4. Enable Record after the enabled sources pass preflight. An ambiguous audio association requires a visible choice of an input or “No audio”; never guess silently.
-
-The main window has a large aspect-preserving preview above a scrollable thumbnail strip. Each thumbnail includes the camera name, selection border, recording enable toggle, and an overlaid audio meter. The selected source's settings expose capture mode and audio assignment. Shared audio is explicitly labeled. Audio-only inputs enabled manually appear as meter cards.
-
-A persistent control bar between the main preview and thumbnails contains Play/Stop and elapsed time, with prominent red PAUSED text while stopped. Each recording creates a new file and Stop finalizes and closes it. Errors stay visible on the affected source and in a session status area. Selecting a source remains available during recording; capture settings, source membership, and audio assignments are locked until recording stops. Devices discovered during recording are offered for the next session.
-
-## Proposed implementation stack
-
-Use Python with PyGObject bindings for GTK 4, GLib, and GStreamer. Application logic handles device discovery, pipeline construction, session state, settings, and UI updates; none of these requires a performance-oriented implementation language. Confirm the supported distribution and library versions before pinning dependencies.
-
-Keep the media data path in native GStreamer elements: capture, decoding, conversion, encoding, metering, and muxing must not process frames or audio samples in Python. Render through the native paintable sink and consume bounded-rate level messages rather than copying media buffers into application code. Python callbacks should be short, especially callbacks invoked from streaming threads; use them only to signal serialized control work. Move blocking filesystem operations off the GTK main loop. If future features require custom per-frame processing, evaluate a native element for that work separately.
-
-Use `gtk4paintablesink` to render each camera once. Bind its paintable to both the thumbnail and, when selected, the main preview. This avoids opening a camera twice or rebuilding its pipeline when selection changes. Validate simultaneous paintable use and rendering performance in the first UI spike. Keep GTK mutations on the main thread; marshal pipeline bus events to application state there.
-
-Do not require a particular GPU vendor. Hide encoder-specific elements and properties behind an encoder adapter. Hardware H.264 is the initial default; H.265 is selectable when a usable adapter is available. A missing hardware encoder is a clear preflight error, with installation/capability diagnostics. Software encoding is not an automatic fallback because hardware encoding is a requirement.
+Audio meters overlay thumbnail images. The main preview's top-left overlay shows the selected source's negotiated target FPS and actual post-encoding recording FPS. Actual FPS is a ten-second rolling average of complete encoded video frames, refreshed every half-second. It uses available sampling time during warmup, resets for each take, and shows a dash while paused. The measurement comes from the recording branch and is independent of preview frame delivery. It measures encoder output throughput, not physical sensor synchronization or durable disk writes.
 
 ## Components and ownership
 
-| Component | Responsibility |
+| Module | Current responsibility |
 | --- | --- |
-| Device registry | Discover devices, track hotplug, normalize identities and capabilities. |
-| Association resolver | Match cameras to audio devices and apply persisted overrides. |
-| Capability probe | Validate capture modes and hardware encoder combinations. |
-| Capture engine | Own the GStreamer graph, clock policy, source bins, and previews. |
-| Session controller | Serialize prepare/start/stop, own the recording state machine and recovery journal. |
-| Recording writer | Own recording branches, one shared Matroska muxer, its track mapping, and the output file lifecycle. |
-| UI model | Present source state, session state, meter values, and actionable errors. |
-| Settings store | Persist preferences, stable source identities, and explicit overrides. |
+| `app.py` | GTK UI, transport state, audio assignment, timers, bus events, pipeline rebuilds, and shutdown. |
+| `devices.py` | PipeWire discovery, physical camera/audio association, source construction, and synthetic development sources. |
+| `desktop.py` | Primary-monitor capture on X11, single-monitor portal capture on Wayland, computer audio, and portal resource lifetime. |
+| `media.py` | Capture/recording graph, hardware encoder selection, MKV output, track tags, counters, and rolling FPS calculation. |
+| `v4l2.py` | Best-effort camera frame-rate locking through the source's open V4L2 descriptor. |
 
-Only the session controller initiates recording graph changes. Streaming callbacks must not perform filesystem work, block on the UI, or change GTK widgets directly. Pipeline operations and their completion events are serialized to avoid races between Stop, device removal, and errors.
+GTK updates and transport transitions run on the main loop. Device discovery runs in a worker so waiting on desktop services does not freeze the window. GStreamer bus messages are dispatched on the main loop. An audio change defers preview reconstruction until after the dropdown notification returns, using normal GLib priority: ordinary idle priority can be starved by continuous preview redraws.
 
-Suggested eventual modules: `devices`, `association`, `media`, `encoders`, `session`, `settings`, and `ui`. Keep pipeline construction independent of widgets so synthetic sources can exercise it without a display.
+There is one pipeline per preview mode or take. Play closes the preview pipeline and opens a recording pipeline. Stop finalizes the recording pipeline, closes it, and opens a fresh preview pipeline. Changing an audio assignment also rebuilds preview. Devices are opened once per pipeline, with tees for video preview and recording; selecting a thumbnail does not reopen devices. Preview images can briefly restart during mode or audio-assignment changes.
 
-## Discovery and audio association
+## Discovery and audio assignment
 
-Use `GstDeviceMonitor` with video-source and audio-source filters, with provider-specific metadata normalization. Initially target V4L2 cameras and one selected desktop audio backend. Probe PipeWire support first and evaluate a PulseAudio-compatible provider as a fallback; do not enumerate the same physical audio endpoint through both backends at once. Backend availability and permissions must be established on the target desktop.
+Discovery uses the GStreamer PipeWire device provider directly. Physical V4L2 webcams are captured through `v4l2src` using their advertised device paths. This avoids the observed case where PipeWire advertises a webcam but its capture stream fails with “target not found.” Other video sources and ordinary audio inputs use provider-created capture elements.
 
-Group multiple V4L2 nodes belonging to one physical camera and distinguish capture nodes from metadata-only endpoints. Select a usable capture node and mode per camera rather than treating every `/dev/video*` entry as an independent camera. Exclude desktop audio monitor/loopback sources from automatic association.
+Physical audio association uses shared USB ancestry in sysfs, with PipeWire's kernel USB bus metadata as a fallback. Names alone do not establish a match. Missing or ambiguous matches default to No audio and can be resolved using the paused audio selector. The selector also offers discovered microphones that were not automatically associated with a camera. Multiple cameras can share one audio input; capture and recording deduplicate it by identity.
 
-Device identity preference:
+Current identities use provider object paths, node names, or display names as a final fallback. They support the current process but are not a complete persistent device-identity scheme. There is no hotplug reconciliation, physical-camera grouping across arbitrary duplicate capture nodes, saved override store, or per-source enable/Retry UI yet. Capture failures stop the application rather than silently omitting a required source.
 
-1. Hardware serial plus endpoint/interface identity where available.
-2. Stable bus/topology identifier plus endpoint identity.
-3. Backend identity as a last resort, with a warning that reconnects may invalidate it.
+## Screen and computer audio
 
-Device paths and display names alone are not stable keys. Distinguish identical cameras without serial numbers by topology; moving them to another port can require confirmation of the saved mapping.
+Screen capture and computer audio are required inputs, including when no webcam is connected.
 
-Audio association priority is an explicit saved override, then an unambiguous shared physical-device identifier or USB parent. Names may suggest candidates but cannot establish a match. A camera may have no audio. Several cameras may use one audio input, which is captured and recorded only once. Preserve channel count by default and expose it in the assignment UI; do not silently downmix.
+On X11, `xrandr --query` identifies the active primary monitor. `ximagesrc` captures its pixel rectangle, including the pointer, rather than the entire multi-monitor desktop. If only one monitor is active, it is used even without a primary flag. Multiple active monitors without a configured primary cause startup to fail. X11 threading is initialized before GTK and capture start.
 
-Open all usable cameras for preview by default, but show busy, inaccessible, or bandwidth-limited sources separately with a Retry action. A source can be excluded from the session to unblock preflight. Never silently omit a source the user has enabled for recording.
+On Wayland, the ScreenCast portal creates a session, requests single-monitor selection, waits for user consent, and provides a PipeWire remote descriptor and stream target. The portable portal API cannot automatically identify/select the primary monitor, so the user must select it in the chooser. Multiple returned streams are rejected. The portal descriptor and session remain alive until application shutdown; cancellation, denial, or session closure fails capture. The media startup timeout does not run while the user is choosing a monitor.
 
-## Capture graph and preview
+Computer audio uses `pulsesrc device=@DEFAULT_MONITOR@` through PulseAudio or `pipewire-pulse`, capturing the default output monitor rather than the default microphone. It remains a separate required input even if the screen's dropdown is assigned a different microphone or No audio. That assignment determines the screen's associated meter/track metadata; it does not disable the independent computer-audio track.
 
-Use one top-level pipeline with a bin per unique capture device. Open each device once, then branch with tees. Negotiate a supported raw or compressed camera mode explicitly. MJPEG/compressed camera modes need a decoder before the raw tee; the initial recording path always uses the selected hardware encoder.
+## Capture and recording graphs
 
-Conceptual graph (conversion elements depend on negotiated caps):
+Camera modes negotiate automatically. MJPEG or other compressed camera output passes through `decodebin` before the raw video tee. The current production codec is hardware H.264. Encoder factories are considered in this order: `vah264enc`, `vah264lpenc`, `nvh264enc`, `nvautogpuh264enc`, `qsvh264enc`, `vaapih264enc`, and `v4l2h264enc`. Factory availability selects a candidate; actual driver allocation and caps negotiation occur at pipeline startup. There is no automatic software fallback or retry with a different hardware backend after a startup failure.
 
 ```text
-camera -> decode if needed -> raw video tee
-                               |-> bounded leaky queue -> preview conversion -> paintable sink
-                               `-> bounded queue -> encoder conversion/upload -> HW encoder
-                                   -> H.264/H.265 parser -> shared muxer video pad
+video input -> decodebin -> raw video tee
+                             |-> leaky queue -> videoconvert -> gtk4paintablesink
+                             `-> queue -> videoconvert -> videoscale -> NV12
+                                 -> hardware H.264 encoder -> h264parse
+                                 -> AVC / AU alignment -> track tags
+                                 -> native frame counter -> queue -> shared matroskamux
 
-unique audio input -> convert/resample -> F32LE interleaved, 48 kHz -> audio tee
-                               |-> bounded leaky queue -> level -> fakesink
-                               `-> bounded queue -> shared muxer audio pad
+audio input -> audioconvert -> audioresample -> F32LE / interleaved / 48 kHz
+            -> level -> track tags -> queue -> shared matroskamux
 
-all recording pads -> one matroskamux -> filesink -> session.mkv
+shared matroskamux -> filesink -> one MKV per take
 ```
 
-Maintain camera aspect ratio. Bound preview queues and drop stale preview frames so a slow display cannot stall capture. Recording queues are bounded and non-leaky: sustained saturation becomes a visible recording failure rather than silent data loss or unlimited memory growth. Initial queue budgets and overload thresholds need measurement with multiple cameras.
+In preview-only mode, video has no encoder/writer branch and audio terminates at `fakesink` after metering. Headless synthetic preview uses video `fakesink` elements. No file or hardware encoder is needed for preview-only mode.
 
-Use GStreamer's `level` messages for per-channel RMS and peak readings at approximately 20 Hz. Present RMS as the main meter, peak hold as a marker, and a clipping indicator. Clamp the display at a useful floor such as -60 dBFS. This is a digital level meter, not a claim of calibrated analog VU ballistics. Meters represent the signal being recorded, without UI gain processing. Clear stale values when a source stops or disconnects.
+Preview queues are leaky and bounded to 200 ms. Recording queues are non-leaky and bounded to two seconds. Both disable the default byte and buffer-count queue limits. Recording saturation currently applies backpressure; explicit sustained-overload detection is future work.
 
-Prefer efficient GPU-memory paths where compatible, but prove correctness with ordinary memory first. Preview conversion and encoder upload requirements differ by GPU and sink; zero-copy operation is an optimization, not a prerequisite for the first version.
+Native scaling allows input dimensions beyond the encoder's limits to negotiate a supported recording size. Thumbnail resolution describes capture/preview dimensions, which can differ from encoded dimensions. Efficient GPU-memory paths and optimal capture-mode selection remain future performance work.
 
-## Recording format and synchronization
+`level` posts channel RMS/peak measurements every 50 ms. The current thumbnail bar displays the largest channel RMS mapped from -60 to 0 dBFS. Separate channel bars, peak hold, and clipping indicators are not implemented. The meter uses the same converted audio path as recording and applies no UI gain or downmix.
 
-Each take produces one MKV file containing one video track per enabled camera and one audio track per unique enabled audio input. Video uses hardware H.264 or H.265; audio uses interleaved IEEE float32 PCM (`F32LE`). All recording branches feed request pads on one `matroskamux`, which writes through one `filesink`. A shared microphone is recorded once even when associated with several cameras. Preserve each input's channel count.
+Recording FPS uses `identity` statistics after H.264 parsing with access-unit alignment, counting complete encoded frames without Python handoff callbacks. Timestamped cumulative counts feed a bounded ten-second history; the rolling window interpolates its boundary between samples when UI timing is irregular. Counter or clock resets start a new history.
 
-Audio remains uncompressed float32 PCM by design; do not add audio compression or convert recording samples to integer PCM.
+## Camera frame-rate locking
 
-The MKV contains independent selectable tracks. Give tracks descriptive names and stable ordering within a take. Record camera/audio associations and device identities as container metadata where supported, and retain detailed diagnostics in application state. Validate metadata round-tripping and multivideo/float32 audio import in the intended editor during the capture spike.
+Before V4L2 format negotiation, the source's `prepare-format` callback queries `V4L2_CID_EXPOSURE_AUTO_PRIORITY` and sets it to zero when writable. This disables exposure-driven dynamic frame-rate changes while preserving the current exposure mode. The numeric control ID handles driver naming differences such as `exposure_dynamic_framerate` and `exposure_auto_priority`.
 
-Allow an editable name and optional comment for each source before recording, persisted with its device settings. Default names come from device labels; examples are “Camera 1 — front” and “Audio — front camera microphone”. Write the name into the Matroska track name for compatibility with track selectors, and write the comment as track-scoped metadata for additional notes, device identity, and camera/audio associations. A shared audio input's comment lists all associated cameras. Send stream-scoped GStreamer title/comment tag events on each recording branch before the muxer writes track headers; global muxer tags describe the whole take and cannot substitute for per-track tags. Validate names and comments after demuxing on the supported GStreamer version and in the intended editor, since metadata display varies between readers.
+Automatic exposure can take time to settle and may make low-light images darker or noisier to fit the negotiated frame interval. Unsupported, disabled, inactive, or read-only controls produce a warning; capture continues. This is not a guarantee against USB, driver, decoder, or encoder drops, and it does not force a particular frame rate on every device.
 
-The selected destination is a single filename, for example `2026-10-25_14-30-00_<session-id>.mkv`. Never overwrite an existing recording. Write to a temporary suffix such as `.mkv.partial`, then rename after successful finalization. No adjacent manifest is required to play or synchronize the recording. Keep a versioned recovery journal in the application's XDG state directory, updated atomically, with the output path, source-to-track mapping, negotiated caps, encoder details, timing diagnostics, and errors. Preserve incomplete output for recovery.
+## Output, timestamps, and metadata
 
-Use a common pipeline clock and base time. Record a session origin in pipeline running time when recording is armed. Map every recording branch's timestamps/segments to that same origin before muxing. Do not independently reset each track's first buffer to zero: this would erase relative start offsets. The MKV timestamps must preserve those offsets without an external manifest. Treat audio device clock drift through the selected backend's clock-slaving/resampling behavior and verify it experimentally; sharing a pipeline alone does not guarantee physical synchronization.
+Every take contains independent video tracks for the discovered cameras and primary screen, plus one audio track for each unique assigned input and required computer-audio input. Audio is uncompressed IEEE float32 PCM (`F32LE`), interleaved at 48 kHz, preserving negotiated channel count. Do not add audio compression or integer conversion to the recording path.
 
-Before committing the session, prepare all encoders and the shared writer, allocate every muxer pad, and establish a common capture boundary. Video tracks begin at decodable keyframes; retain their actual start offsets from that boundary. Validate this behavior in the graph spike, including encoder preroll, latency, keyframe requests, and muxer interleaving when sources start at different times. The UI reports Recording only after every required branch has begun supplying the writer and output has started. A timeout fails startup and finalizes or preserves the partial output.
+Output names follow `StudioRecorder_<local timestamp with microseconds and UTC offset>_<random suffix>.mkv`. The application exclusively reserves the `.mkv.partial` path and never overwrites an existing take. After EOS and pipeline closure, a hard link publishes the final name without replacing an existing file, then the temporary name is removed. The filesystem must support this operation. Failed/incomplete finalization preserves partial output; crash recovery is not guaranteed.
 
-Expect ordinary USB cameras to lack hardware frame synchronization. The target is a common software timeline with measured residual offsets and drift, not guaranteed simultaneous sensor exposure. Measure startup alignment and long-duration drift using a shared flash/clap test before setting a numerical synchronization claim.
+Stream-scoped title/comment tags identify sources, device identities, and camera/audio associations. A shared audio track lists its associated sources. User-editable track names/comments are not implemented. Some readers expose escaped values from GStreamer's Matroska tag writer; intended-editor compatibility still needs validation.
 
-Use one MKV per take without segmentation. `splitmuxsink` accepts only one video stream per instance and therefore does not fit this multivideo output. Do not present unfinished MKV files as guaranteed crash-recoverable.
+All tracks share a pipeline clock and base time. `matroskamux` uses `offset-to-zero=true` to normalize the common output timeline without independently zeroing every input. A new pipeline creates a fresh timeline for each take. There is no adjacent manifest or recovery journal. Physical sensor synchronization, measured start offsets, and long-duration audio clock drift have not been comprehensively validated.
 
-## Session lifecycle and failures
+## Lifecycle and failures
 
 ```text
-Discovering -> Previewing -> Preparing -> Recording -> Finalizing -> Previewing
-                                 |            |
-                                 `-> Failed <-'
+Discovering / portal consent -> Preparing preview -> Paused
+Paused -> Starting take -> Recording -> Finalizing -> Preparing preview -> Paused
+Paused -> Changing audio -> Preparing preview -> Paused
+Any state -> Exit; an active take is finalized first
 ```
 
-Treat source health separately from session state: unavailable, opening, ready, recording, or failed. A Failed session still runs bounded cleanup/finalization before another recording is permitted.
+The controller waits for pipeline PLAYING before reporting Paused or Recording. Recording elapsed time begins at that transition. Play and audio selectors are enabled only while paused; Stop is enabled while starting/recording. During finalization, new takes and assignment changes are blocked.
 
-Preflight checks the destination's writability and free space, enabled device readiness, resolved audio choices, negotiated modes, and actual hardware encoder availability for the whole session. Finding an encoder factory is insufficient: test allocation and caps negotiation for concurrent sources. Show estimated disk usage using configured video rates and exact PCM rate (48,000 samples × channels × 4 bytes per second). Free-space estimates are advisory; monitor space and write errors during recording.
+Stop sends EOS to the entire current recording pipeline and waits for all sinks, including the shared muxer/filesink, to finish. It then closes that pipeline and reopens preview. Closing the window, Ctrl-C, or SIGTERM follows the same finalization path but exits instead of reopening preview. Exiting while stopped creates no file.
 
-Attach/detach recording branches using pad blocking and explicit completion handling. On Stop, send EOS to every active recording input and wait for the shared muxer/filesink to finish, then detach the recording bin and return to preview. Track completion within the recording bin because preview sinks remain active. Do not send EOS to the whole preview graph. Use a finite finalization timeout, preserve the incomplete MKV, and report whether the container finalized successfully.
+Media startup has a 30-second timeout; finalization has a ten-second timeout. Pipeline errors, startup failures, and finalization failures return a nonzero process exit code. Synchronous startup errors are read from the GStreamer bus before cleanup flushes it, preserving the failing element and driver/debug details. A failed take can still produce a finalized MKV if draining succeeds. SIGKILL cannot finalize output.
 
-For the first version, loss of any enabled source, encoder failure, timestamp discontinuity that cannot be handled, or sustained disk/queue failure stops the entire take and attempts to finalize the shared MKV using the data already received. Ensure failed inputs cannot leave the muxer waiting indefinitely for EOS. This simpler policy avoids producing a silently partial session. A shared pipeline can propagate errors across bins; treat failures as session-wide and rebuild preview bins afterward if necessary. Continuing unaffected tracks is a later feature requiring explicit pipeline isolation.
+## Validation to date
 
-Closing the window during recording requests Stop and shows finalization progress. A forced exit may leave an incomplete MKV; the next launch detects unfinished recovery journals and offers the output locations and diagnostics. Do not delete partial takes automatically.
+The automated suite currently has 27 tests covering source routing, primary-monitor selection, portal request policy/resource cleanup, rolling FPS, V4L2 locking/fallback behavior, paused startup without files, multiple takes, audio reassignment and recording-time locking, resistance to GLib idle starvation, encoded-rate measurement without preview, output codecs/tags, decoding all tracks, startup diagnostics, and Stop/exit finalization. Media integration tests use synthetic sources and native software H.264 encoding; `ffprobe`/`ffmpeg` inspect and decode the files.
 
-## Settings and session data
+Manual X11 smoke tests have exercised a C920 webcam, primary-monitor capture, webcam microphone, stereo computer audio, NVIDIA H.264 encoding, previews, successive takes, and audio selector recovery. With dynamic frame rate enabled, the camera delivered about 24 FPS despite 30 FPS caps. Disabling it shortened auto exposure from about 41.6 ms to 33.3 ms; the final four seconds of the test recording measured 30.0 FPS. These are results for the tested configuration, not universal hardware guarantees.
 
-Store versioned user settings under the XDG configuration directory and diagnostics under the XDG state directory. Persist destination, preferred codec, capture mode per device, enabled state, and audio overrides. Hardware-derived identity changes must not silently attach an old override to a different device.
+Wayland portal behavior has automated mocked coverage but still needs a real Wayland desktop smoke test. Additional GPU backends, multi-camera bandwidth/encoder limits, editor interoperability, long takes, drift, disk exhaustion, and unplug behavior need hardware validation.
 
-The versioned recovery journal includes a unique session ID, application/library versions, UTC start time, session running-time origin, chosen clock, device configurations, association provenance, the output path, container track mapping, and timeline diagnostics, finalization state, and timestamped warnings/errors. Store media timestamps as integer nanoseconds. Distinguish a completed take, a failed but finalized take, and an incomplete take. Avoid logging captured audio/video content.
+## Future work
 
-## Implementation sequence and validation
-
-1. **Capture spike:** exercise synthetic video/audio and multiple video tracks and at least one real camera with a hardware encoder, float32 PCM audio in the same MKV, common timestamps, branch start/stop, and file finalization. Inspect negotiated caps and demuxed timestamps; confirm the editor can access every video and audio track in the MKV.
-2. **Preview shell:** build the GTK window, shared paintables, selection, meters, and source health display. Confirm selection does not reopen capture or affect recording.
-3. **Discovery and pairing:** implement stable identity, physical-camera grouping, explicit overrides, and hotplug. Test ambiguous matches and shared audio deduplication.
-4. **Session controller:** add preflight, recovery journals, atomic file handling, recording controls, timeouts, and useful failures.
-5. **Hardware validation:** test multiple cameras, concurrent encoder limits, USB bandwidth pressure, reconnects, disk exhaustion, and long takes. Measure synchronization and drift before publishing supported configurations.
-
-Automated integration tests should use `videotestsrc` and `audiotestsrc` to verify that one MKV contains exactly the enabled video tracks and deduplicated audio tracks, audio remains float32, preview switching leaves the recording graph intact, timestamps preserve relative offsets, and Stop finalizes playable output. Inject source/write errors and verify bounded cleanup and honest recovery journal states. Hardware encoder tests are conditional and must report skipped coverage when no supported device exists; real hardware validation remains necessary.
-
-## Decisions to validate first
-
-- Confirm the minimum Python, PyGObject, GTK 4, and GStreamer versions on the supported Linux distributions.
-- Validate access to all video and float32 audio tracks in one MKV with the intended editor.
-- Identify the first hardware encoder backend from the development machine, then validate a second backend before claiming portability.
-- Establish expected camera counts, resolutions, frame rates, and take duration; use measurements to choose bitrate and queue defaults.
-- Verify the desktop audio backend exposes enough metadata for reliable camera/audio association.
+- H.265 selection and tested encoder adapters/fallback among usable hardware backends.
+- Persistent settings, stable physical device identities, saved audio overrides, and editable track names/comments.
+- Per-source enable/Retry controls, hotplug reconciliation, richer source health, and audio-only meter cards.
+- Continuous capture with recording branches attached/detached at safe boundaries, replacing full pipeline rebuilds. Recording-only EOS must then avoid ending preview.
+- Destination/free-space preflight, disk-use estimates, sustained-backpressure diagnostics, and recoverable session state.
+- Per-channel meters, peak hold, clipping indicators, and stale-value handling on device failures.
+- Measured synchronization guarantees, explicit common capture boundaries, and long-duration drift validation.
 
 ## Technical references
 
-- [GstDeviceMonitor](https://gstreamer.freedesktop.org/documentation/gstreamer/gstdevicemonitor.html): discovery and device-added/removed messages.
-- [gtk4paintablesink](https://gstreamer.freedesktop.org/documentation/gtk4/index.html): GTK paintable rendering and optional GPU paths.
-- [matroskamux](https://gstreamer.freedesktop.org/documentation/matroska/matroskamux.html): accepted video and raw float32 audio caps.
-- [splitmuxsink](https://gstreamer.freedesktop.org/documentation/multifile/splitmuxsink.html): segmentation constraints and asynchronous finalization.
-- [Matroska tag precedence](https://www.matroska.org/technical/tags-precedence.html): track names provide compatibility with readers that do not display tags.
-- [Matroska tags](https://www.matroska.org/technical/tagging.html): comments and other descriptive metadata.
+- [ScreenCast portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html): consent, stream selection, and remote descriptors.
+- [ximagesrc](https://gstreamer.freedesktop.org/documentation/ximagesrc/): X11 capture rectangles and threading.
+- [gtk4paintablesink](https://gstreamer.freedesktop.org/documentation/gtk4/index.html): GTK rendering.
+- [matroskamux](https://gstreamer.freedesktop.org/documentation/matroska/matroskamux.html): video/float32 audio formats and muxing.
+- [identity](https://gstreamer.freedesktop.org/documentation/coreelements/identity.html): native encoded-buffer counters.
+- [V4L2 camera controls](https://docs.kernel.org/userspace-api/media/v4l/ext-ctrls-camera.html): exposure and dynamic frame-rate control.
+- [Matroska tags](https://www.matroska.org/technical/tagging.html) and [tag precedence](https://www.matroska.org/technical/tags-precedence.html): track identification and reader compatibility.
