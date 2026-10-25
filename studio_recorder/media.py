@@ -1,6 +1,7 @@
 """One pipeline, one multitrack Matroska writer, native preview rendering."""
 
 from datetime import datetime
+from collections import deque
 from pathlib import Path
 import os
 import uuid
@@ -48,10 +49,37 @@ def encoder_factory(test_sources=False):
     raise RuntimeError("No hardware H.264 encoder is available. Install the GStreamer plugin and GPU driver for VA-API, NVIDIA, Quick Sync, or V4L2 encoding. Software encoding is only used with --test-sources.")
 
 
+class RollingFramerate:
+    """Ten-second rate from timestamped cumulative native frame counts."""
+
+    def __init__(self):
+        self.samples = deque()
+
+    def update(self, now, rendered):
+        if self.samples and (now < self.samples[-1][0] or rendered < self.samples[-1][1]):
+            self.samples.clear()
+        if self.samples and now == self.samples[-1][0]:
+            return None
+        self.samples.append((now, rendered))
+        cutoff = now - 10 * Gst.SECOND
+        # Keep one sample at/before the boundary for interpolation when the
+        # half-second UI timer is delayed or does not land on it exactly.
+        while len(self.samples) > 1 and self.samples[1][0] <= cutoff:
+            self.samples.popleft()
+        start, initial = self.samples[0]
+        if start < cutoff and len(self.samples) > 1:
+            next_time, next_count = self.samples[1]
+            initial += (next_count - initial) * (cutoff - start) / (next_time - start)
+            start = cutoff
+        return (rendered - initial) * Gst.SECOND / (now - start) if now > start else None
+
+
 class Recorder:
     def __init__(self, cameras, directory, *, preview=True, test_sources=False):
         self.pipeline = Gst.Pipeline.new("studio-recorder")
         self.previews = []
+        self.preview_sinks = {}
+        self._preview_samples = {}
         self.level_sources = {}
         self.final_path = None
         self.partial_path = None
@@ -148,6 +176,25 @@ class Recorder:
             if not tee.link(preview_queue):
                 raise RuntimeError("Cannot attach preview")
             self.previews.append((camera, sink.get_property("paintable")))
+            self.preview_sinks[camera.source.identity] = sink
+
+    def preview_framerates(self):
+        """Sample native sink counters; no Python callback per video frame."""
+        now = Gst.util_get_timestamp()
+        rates = {}
+        for identity, sink in self.preview_sinks.items():
+            target = None
+            negotiated = sink.get_static_pad("sink").get_current_caps()
+            if negotiated:
+                valid, numerator, denominator = negotiated.get_structure(0).get_fraction("framerate")
+                if valid and numerator > 0 and denominator > 0:
+                    target = numerator / denominator
+            stats = sink.get_property("stats")
+            rendered = stats.get_value("rendered")
+            history = self._preview_samples.setdefault(identity, RollingFramerate())
+            actual = history.update(now, rendered)
+            rates[identity] = (target, actual)
+        return rates
 
     def add_audio(self, source_info, cameras):
         source = source_info.create_element()

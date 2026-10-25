@@ -31,6 +31,9 @@ class Application:
         self.startup_timer = 0
         self.stop_timer = 0
         self.duration_timer = 0
+        self.fps_timer = 0
+        self.fps_rates = {}
+        self.selected_source = None
         self.signal_sources = []
         self.meters = {}
         self.window = None
@@ -50,7 +53,17 @@ class Application:
         layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.picture = Gtk.Picture(hexpand=True, vexpand=True)
         self.picture.set_can_shrink(True)
-        layout.append(self.picture)
+        preview_overlay = Gtk.Overlay(hexpand=True, vexpand=True)
+        preview_overlay.set_child(self.picture)
+        self.fps_label = Gtk.Label(label="Target: — fps   Actual: — fps")
+        self.fps_label.set_halign(Gtk.Align.START)
+        self.fps_label.set_valign(Gtk.Align.START)
+        self.fps_label.set_margin_start(8)
+        self.fps_label.set_margin_top(8)
+        self.fps_label.set_can_target(False)
+        preview_overlay.add_overlay(self.fps_label)
+        layout.append(preview_overlay)
+        self.show_framerate()
         self.thumbnails = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
@@ -114,6 +127,7 @@ class Application:
             bus.connect("message", self.on_message)
             if self.window:
                 self.populate_previews()
+                self.fps_timer = GLib.timeout_add(500, self.update_framerates)
             for camera in cameras:
                 self.status(f"Source: {camera.source.name}; audio: {camera.audio.name if camera.audio else 'no associated input'}")
             self.status(f"Starting recording: {self.recorder.final_path}")
@@ -143,11 +157,27 @@ class Application:
             column.append(Gtk.Label(label=camera.source.name))
             button = Gtk.Button()
             button.set_child(column)
-            button.connect("clicked", lambda _button, p=paintable: self.picture.set_paintable(p))
+            button.connect("clicked", lambda _button, identity=camera.source.identity, p=paintable: self.select_preview(identity, p))
             self.thumbnails.append(button)
             if first:
-                self.picture.set_paintable(paintable)
+                self.select_preview(camera.source.identity, paintable)
                 first = False
+
+    def select_preview(self, identity, paintable):
+        self.selected_source = identity
+        self.picture.set_paintable(paintable)
+        self.show_framerate()
+
+    def update_framerates(self):
+        self.fps_rates = self.recorder.preview_framerates()
+        self.show_framerate()
+        return GLib.SOURCE_CONTINUE
+
+    def show_framerate(self):
+        target, actual = self.fps_rates.get(self.selected_source, (None, None))
+        target_text = f"{target:.1f}" if target is not None else "—"
+        actual_text = f"{actual:.1f}" if actual is not None else "—"
+        self.fps_label.set_markup(f'<span background="#202020" foreground="white">  Target: {target_text} fps   Actual: {actual_text} fps  </span>')
 
     def on_message(self, _bus, message):
         if self.done:
@@ -233,7 +263,7 @@ class Application:
             return
         self.done = True
         self.stopping = True
-        for name in ("startup_timer", "stop_timer", "duration_timer"):
+        for name in ("startup_timer", "stop_timer", "duration_timer", "fps_timer"):
             self.remove_timer(name)
         if self.recorder:
             try:
