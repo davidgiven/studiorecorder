@@ -2,7 +2,7 @@
 
 Status: initial proposal. Requirements come from [AGENTS.md](AGENTS.md); choices below are provisional until implementation validates them on Linux hardware.
 
-Initial implementation milestone: provide a minimal preview window without recording controls or settings. Automatically start recording on launch into one timestamped MKV in the current directory. Closing the window or receiving Ctrl-C/SIGTERM drains the pipeline with EOS, finalizes the output, and exits. The settings and interactive session controls described below are later milestones; see [README.md](README.md) for the skeleton's implemented scope and dependencies.
+Current implementation milestone: start with live previews and recording stopped. A Play/Stop bar between the main preview and thumbnails shows prominent red PAUSED text while stopped and elapsed time while recording. Every Play creates a new timestamped MKV; every Stop drains and finalizes that file before returning to preview. Closing the window or receiving Ctrl-C/SIGTERM finalizes an active take and exits. Audio dropdowns below source names allow assignments (including No audio) only while paused, with discovered inputs and Computer audio available. Assignments persist across takes for the current run; computer audio remains an independent required input. The initial implementation rebuilds the capture pipeline at each transition or audio assignment change, so previews may briefly restart. Continuous capture with dynamic recording branches, described below, remains a later optimization. See [README.md](README.md) for implemented scope and dependencies.
 
 ## Scope and user experience
 
@@ -19,7 +19,7 @@ On launch:
 
 The main window has a large aspect-preserving preview above a scrollable thumbnail strip. Each thumbnail includes the camera name, selection border, recording enable toggle, and an overlaid audio meter. The selected source's settings expose capture mode and audio assignment. Shared audio is explicitly labeled. Audio-only inputs enabled manually appear as meter cards.
 
-A persistent control bar contains Record/Stop, elapsed time, destination, and session status. Errors stay visible on the affected source and in a session status area. Selecting a source remains available during recording; capture settings, source membership, and audio assignments are locked until recording stops. Devices discovered during recording are offered for the next session.
+A persistent control bar between the main preview and thumbnails contains Play/Stop and elapsed time, with prominent red PAUSED text while stopped. Each recording creates a new file and Stop finalizes and closes it. Errors stay visible on the affected source and in a session status area. Selecting a source remains available during recording; capture settings, source membership, and audio assignments are locked until recording stops. Devices discovered during recording are offered for the next session.
 
 ## Proposed implementation stack
 

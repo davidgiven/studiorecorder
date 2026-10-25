@@ -75,7 +75,7 @@ class RollingFramerate:
 
 
 class Recorder:
-    def __init__(self, cameras, directory, *, preview=True, test_sources=False):
+    def __init__(self, cameras, directory, *, preview=True, test_sources=False, record=True, additional_audio=()):
         self.pipeline = Gst.Pipeline.new("studio-recorder")
         self.previews = []
         self.preview_sinks = {}
@@ -86,8 +86,10 @@ class Recorder:
         self.started = False
         self.finished = False
         self._requested_pads = []
-        self.encoder = encoder_factory(test_sources)
+        self.record = record
+        self.encoder = encoder_factory(test_sources) if record else None
         self.cameras = cameras
+        self.additional_audio = additional_audio
         self.test_sources = test_sources
         self.preview = preview
         self.directory = Path(directory)
@@ -110,16 +112,17 @@ class Recorder:
             raise RuntimeError("Cannot record without cameras")
         if self.preview and not Gst.ElementFactory.find("gtk4paintablesink"):
             raise RuntimeError("Missing gtk4paintablesink. Install the GStreamer GTK 4 plugin (gst-plugin-gtk4).")
-        # Reserve exclusively; even concurrent launches must not overwrite output.
-        stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S_%f%z")
-        self.final_path = self.directory / f"StudioRecorder_{stamp}_{uuid.uuid4().hex[:8]}.mkv"
-        self.partial_path = self.final_path.with_suffix(".mkv.partial")
-        with self.partial_path.open("xb"):
-            pass
-        self.mux = make("matroskamux", writing_app="StudioRecorder", offset_to_zero=True)
-        self.sink = make("filesink", location=str(self.partial_path), sync=False)
-        self.add_chain(self.mux, self.sink)
-        audio_inputs = {}
+        if self.record:
+            # Reserve exclusively; even concurrent launches must not overwrite output.
+            stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S_%f%z")
+            self.final_path = self.directory / f"StudioRecorder_{stamp}_{uuid.uuid4().hex[:8]}.mkv"
+            self.partial_path = self.final_path.with_suffix(".mkv.partial")
+            with self.partial_path.open("xb"):
+                pass
+            self.mux = make("matroskamux", writing_app="StudioRecorder", offset_to_zero=True)
+            self.sink = make("filesink", location=str(self.partial_path), sync=False)
+            self.add_chain(self.mux, self.sink)
+        audio_inputs = {source.identity: source for source in self.additional_audio}
         for camera in self.cameras:
             self.add_video(camera)
             if camera.audio:
@@ -146,29 +149,30 @@ class Recorder:
                     self.pipeline.post_message(Gst.Message.new_application(self.pipeline, structure))
 
         decoder.connect("pad-added", decoded)
-        record_queue = queue()
-        converter = make("videoconvert")
-        scaler = make("videoscale")
-        raw_caps = "video/x-raw,format=NV12"
-        if self.test_sources:
-            raw_caps = "video/x-raw,format=I420"
-        raw_filter = caps(raw_caps)
-        encoder = make(self.encoder)
-        if self.test_sources:
-            encoder.set_property("tune", "zerolatency")
-            encoder.set_property("speed-preset", "ultrafast")
-        elif encoder.find_property("bitrate"):
-            encoder.set_property("bitrate", 8000)
-        parser = make("h264parse")
-        encoded_filter = caps("video/x-h264,stream-format=avc,alignment=au")
-        tags = track_tags(camera.source.name, f"Video source: {camera.source.identity}; audio: {camera.audio.name if camera.audio else 'none'}")
-        # Encoders may buffer; a queue after encoding lets the muxer interleave
-        # without blocking another camera's encoder startup.
-        encoded_queue = queue()
-        self.add_chain(record_queue, converter, scaler, raw_filter, encoder, parser, encoded_filter, tags, encoded_queue)
-        if not tee.link(record_queue):
-            raise RuntimeError("Cannot attach recording video branch")
-        self.mux_track(encoded_queue, "video")
+        if self.record:
+            record_queue = queue()
+            converter = make("videoconvert")
+            scaler = make("videoscale")
+            raw_caps = "video/x-raw,format=NV12"
+            if self.test_sources:
+                raw_caps = "video/x-raw,format=I420"
+            raw_filter = caps(raw_caps)
+            encoder = make(self.encoder)
+            if self.test_sources:
+                encoder.set_property("tune", "zerolatency")
+                encoder.set_property("speed-preset", "ultrafast")
+            elif encoder.find_property("bitrate"):
+                encoder.set_property("bitrate", 8000)
+            parser = make("h264parse")
+            encoded_filter = caps("video/x-h264,stream-format=avc,alignment=au")
+            tags = track_tags(camera.source.name, f"Video source: {camera.source.identity}; audio: {camera.audio.name if camera.audio else 'none'}")
+            # Encoders may buffer; a queue after encoding lets the muxer interleave
+            # without blocking another camera's encoder startup.
+            encoded_queue = queue()
+            self.add_chain(record_queue, converter, scaler, raw_filter, encoder, parser, encoded_filter, tags, encoded_queue)
+            if not tee.link(record_queue):
+                raise RuntimeError("Cannot attach recording video branch")
+            self.mux_track(encoded_queue, "video")
         if self.preview:
             preview_queue, preview_converter = queue(True), make("videoconvert")
             sink = make("gtk4paintablesink", sync=False)
@@ -178,6 +182,13 @@ class Recorder:
                 raise RuntimeError("Cannot attach preview")
             self.previews.append((camera, sink.get_property("paintable")))
             self.preview_sinks[camera.source.identity] = sink
+
+        elif not self.record:
+            preview_queue, sink = queue(True), make("fakesink", sync=False)
+            sink.set_property("async", False)
+            self.add_chain(preview_queue, sink)
+            if not tee.link(preview_queue):
+                raise RuntimeError("Cannot attach headless preview")
 
     def preview_resolutions(self):
         resolutions = {}
@@ -218,7 +229,14 @@ class Recorder:
         audio_queue = queue()
         self.add_chain(source, converter, resampler, raw_filter, meter, tags, audio_queue)
         self.level_sources[meter.name] = source_info.identity
-        self.mux_track(audio_queue, "audio")
+        if self.record:
+            self.mux_track(audio_queue, "audio")
+        else:
+            sink = make("fakesink", sync=False)
+            sink.set_property("async", False)
+            self.pipeline.add(sink)
+            if not audio_queue.link(sink):
+                raise RuntimeError("Cannot attach audio meter preview")
 
     def start(self):
         result = self.pipeline.set_state(Gst.State.PLAYING)
@@ -247,7 +265,7 @@ class Recorder:
         for pad in self._requested_pads:
             self.mux.release_request_pad(pad)
         self._requested_pads.clear()
-        if finalized and self.partial_path:
+        if finalized and self.record and self.partial_path:
             # hard link creates the final name without replacing any existing
             # file, then removes only this take's temporary name.
             os.link(self.partial_path, self.final_path)

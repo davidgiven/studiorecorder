@@ -1,6 +1,6 @@
 # StudioRecorder
 
-A Python/GStreamer skeleton for automatic multitrack recording on a Linux desktop.
+A Python/GStreamer application for multitrack recording on a Linux desktop.
 
 Launch the application from the directory where recordings should be saved:
 
@@ -8,9 +8,9 @@ Launch the application from the directory where recordings should be saved:
 python3 -m studio_recorder
 ```
 
-It discovers cameras through PipeWire, matches microphones using physical USB identity, and starts recording every discovered camera and its associated audio, plus primary-monitor capture and computer audio. A screen-only session works even without a webcam. Physical V4L2 webcams are opened directly through `v4l2src` using their advertised device path; other camera types and audio inputs use their provider's capture element. It writes one timestamped `StudioRecorder_*.mkv` in the current directory, containing independent H.264 video tracks and deduplicated, uncompressed float32 PCM audio tracks. Track names/comments identify sources and audio associations.
+It discovers cameras through PipeWire, matches microphones using physical USB identity, and previews every discovered camera and its associated audio, plus primary-monitor capture and computer audio. It starts stopped and creates no output until Play is pressed. A screen-only session works even without a webcam. Physical V4L2 webcams are opened directly through `v4l2src` using their advertised device path; other camera types and audio inputs use their provider's capture element. It writes one timestamped `StudioRecorder_*.mkv` in the current directory, containing independent H.264 video tracks and deduplicated, uncompressed float32 PCM audio tracks. Track names/comments identify sources and audio associations.
 
-The window shows a selected source, clickable thumbnails (including Screen), and audio meters. Each preview button shows its negotiated capture resolution and target FPS, plus the actual FPS averaged over the last ten seconds, above its thumbnail image. These summaries update every half-second. The large preview also shows the selected camera's target and actual FPS in a top-left overlay, using the same ten-second rolling average. During startup the average uses the elapsed sampling time until ten seconds are available. Unknown rates display as a dash; a stalled preview gradually falls to zero as its last frames leave the window. There are no recording controls or settings. Close the window, press Ctrl-C in the terminal, or send SIGTERM to stop. The application keeps its event loop alive while EOS drains the pipeline and finalizes the MKV, then exits. Output is named `.mkv.partial` until finalization succeeds; interrupted or failed finalization preserves that file and reports a nonzero exit status. SIGKILL cannot finalize a recording.
+The window shows a selected source, clickable thumbnails (including Screen), and audio meters. Below each source name, an audio dropdown lists discovered input devices, Computer audio, and No audio. It is enabled only while paused; changing it restarts the live preview and updates the meter and next take. Assignments last for the current application run. Shared inputs are still recorded only once. Computer audio remains a required independent track even when the screen is assigned another input or No audio. Each preview button shows its negotiated capture resolution and target FPS, above its thumbnail image. These summaries update every half-second. The large preview also shows the selected camera's target and actual FPS in a top-left overlay, using the same ten-second rolling average. During startup the average uses the elapsed sampling time until ten seconds are available. Unknown rates display as a dash; a stalled preview gradually falls to zero as its last frames leave the window. A bar between the main preview and thumbnails contains Play and Stop buttons. While stopped, prominent red PAUSED text is shown and live previews/meters remain active. Play creates a new timestamped MKV and shows elapsed time as HH:MM:SS. Stop drains, finalizes, and closes that take, then returns to PAUSED; Play is disabled until finalization and preview preparation finish. Capture pipelines are reopened at these transitions, so previews can briefly restart. Close the window, press Ctrl-C in the terminal, or send SIGTERM to exit, finalizing an active take first. The application keeps its event loop alive while EOS drains the pipeline and finalizes the MKV, then exits. Output is named `.mkv.partial` until finalization succeeds; interrupted or failed finalization preserves that file and reports a nonzero exit status. SIGKILL cannot finalize a recording.
 
 ## Dependencies
 
@@ -32,18 +32,18 @@ Check individual elements with `gst-inspect-1.0 gtk4paintablesink` or `gst-inspe
 
 ## Development checks
 
-A separate synthetic mode uses two test cameras, one shared test microphone, a screen source, computer audio, and the native software `x264enc` plugin. It never accesses capture devices. Headless operation and automatic stop duration are development options only:
+A separate synthetic mode uses two test cameras, one shared test microphone, a screen source, computer audio, and the native software `x264enc` plugin. It never accesses capture devices. Headless operation and automatic stop duration are development options only. An explicit `--duration` synthetic run automatically starts one take after preview initialization and exits when its duration expires; normal launches always start stopped:
 
 ```sh
 python3 -m studio_recorder --test-sources --headless --duration 3
 python3 -m unittest discover -s tests -v
 ```
 
-The integration tests additionally require `ffprobe` and `ffmpeg`. They verify one MKV containing both camera tracks, the screen track, and two float32 audio tracks, embedded identification tags, successful decoding of all tracks, and finalization through automatic stop, Ctrl-C, and the window-close handler. A desktop smoke test is still needed for preview rendering and real hardware capture.
+The integration tests additionally require `ffprobe` and `ffmpeg`. They verify one MKV containing both camera tracks, the screen track, and two float32 audio tracks, embedded identification tags, successful decoding of all tracks, stopped startup without output files, separate files across repeated Play/Stop cycles, and finalization through Stop, Ctrl-C, and the window-close handler. A desktop smoke test is still needed for preview rendering and real hardware capture.
 
 ## Current scope
 
-This is the initial startup-to-shutdown implementation of [DESIGN.md](DESIGN.md). It requires PipeWire and uses H.264; H.265 selection, settings, overrides, recovery journals, and hotplug handling are not implemented. In addition to computer audio from the default output monitor, it records audio physically associated with each camera, rather than guessing a default microphone. A camera with no match records video only; an ambiguous match aborts startup. Unrelated microphones are not recorded.
+This is the initial preview and per-take recording implementation of [DESIGN.md](DESIGN.md). It requires PipeWire and uses H.264; H.265 selection, saved settings/overrides, recovery journals, and hotplug handling are not implemented. In addition to computer audio from the default output monitor, it records audio physically associated with each camera, rather than guessing a default microphone. A camera with no match or an ambiguous match starts with No audio; choose an input while paused. Other microphones are recorded only when selected.
 
 Camera modes currently negotiate automatically. Recording branches use native video scaling when a source (such as an ultrawide desktop) exceeds the hardware encoder's supported dimensions; thumbnail resolutions describe the capture/preview dimensions, which may be larger than the encoded video. Preview queues drop stale frames, while recording queues apply bounded backpressure. Multi-camera bandwidth, sustained overload handling, encoder choice across multiple GPUs, and long-duration synchronization need hardware validation. Device/pipeline errors stop the take, attempt bounded finalization, and return a nonzero exit code. A failed take that successfully finalizes can still produce an MKV; terminal diagnostics distinguish it from a successful take.
 

@@ -79,6 +79,7 @@ def physical_id(props):
 class Registry:
     def __init__(self):
         self.provider = None
+        self.audio_sources = []
 
     def discover(self):
         # Use one backend so the same hardware is not captured through both
@@ -103,12 +104,13 @@ class Registry:
             source = Source(device.get_display_name(), device, physical_id(props), identity, video_path)
             (videos if kind == "Video/Source" else audios).append(source)
         cameras = []
+        self.audio_sources = sorted(audios, key=lambda source: (source.name, source.identity))
         for video in sorted(videos, key=lambda item: item.identity):
             matches = [audio for audio in audios
                        if video.physical_id and audio.physical_id == video.physical_id]
-            if len(matches) > 1:
-                raise RuntimeError(f"Ambiguous audio inputs for {video.name}; source overrides are not implemented yet.")
-            cameras.append(Camera(video, matches[0] if matches else None))
+            # Leave ambiguous matches unassigned so the paused device selector
+            # can resolve them without guessing or preventing application startup.
+            cameras.append(Camera(video, matches[0] if len(matches) == 1 else None))
         return cameras
 
     def stop(self):
