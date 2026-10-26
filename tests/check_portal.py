@@ -46,7 +46,11 @@ def method_call(conn, sender, path, interface, method, parameters, invocation):
     response = 0
     if method == "CreateSession":
         session = f"{PATH}/session/{sender_path}/{options['session_handle_token']}"
-        results["session_handle"] = GLib.Variant("o", session)
+        results["session_handle"] = GLib.Variant("s", session)
+        if scenario == "invalid-session":
+            results["session_handle"] = GLib.Variant("s", "invalid path")
+        elif scenario == "missing-session":
+            results.clear()
         if scenario == "denied":
             response = 1
     elif method == "SelectSources":
@@ -65,7 +69,7 @@ def method_call(conn, sender, path, interface, method, parameters, invocation):
 
 
 registration = connection.register_object(PATH, Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0], method_call, None, None)
-for scenario in ("serial", "node", "denied", "multiple", "cancel"):
+for scenario in ("serial", "node", "denied", "multiple", "cancel", "invalid-session", "missing-session"):
     methods.clear()
     process = subprocess.Popen([str(BINARY), scenario], env=dict(os.environ, WAYLAND_DISPLAY="test-wayland",
                                G_DEBUG="fatal-criticals"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -92,5 +96,7 @@ for scenario in ("serial", "node", "denied", "multiple", "cancel"):
     assert methods[0] == "CreateSession"
     if scenario in ("serial", "node"):
         assert methods == ["CreateSession", "SelectSources", "Start", "OpenPipeWireRemote"]
+    elif scenario in ("invalid-session", "missing-session"):
+        assert methods == ["CreateSession"]
     print(f"portal {scenario}: ok", flush=True)
 connection.unregister_object(registration)

@@ -239,9 +239,12 @@ public class DesktopCapture : GLib.Object
         string sender = connection.get_unique_name().substring(1).replace(".", "_");
         session = PATH + "/session/" + sender + "/studio_" + Uuid.string_random().replace("-", "");
         Variant created = yield request("CreateSession");
-        Variant? handle = created.lookup_value("session_handle", new VariantType("o"));
+        // The portal returns this object path as a string for historical compatibility.
+        Variant? handle = created.lookup_value("session_handle", new VariantType("s"));
         if (handle == null)
             throw new RecorderError.FAILED("Portal did not return a session.");
+        if (!Variant.is_object_path(handle.get_string()))
+            throw new RecorderError.FAILED("Portal returned an invalid session path.");
         session = handle.get_string();
         closed_subscription = connection.signal_subscribe(
             /* sender= */ BUS,

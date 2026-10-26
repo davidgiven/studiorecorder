@@ -55,6 +55,10 @@ int main(string[] args)
                     assert(error.message.contains("primary monitor"));
                 else if (scenario == "cancel")
                     assert(error is IOError.CANCELLED);
+                else if (scenario == "invalid-session")
+                    assert(error.message.contains("invalid session path"));
+                else if (scenario == "missing-session")
+                    assert(error.message.contains("did not return a session"));
                 else
                     GLib.error("Unexpected portal failure: %s", error.message);
                 capture.close();
