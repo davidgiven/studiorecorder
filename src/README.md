@@ -1,6 +1,6 @@
 # StudioRecorder — source and development guide
 
-StudioRecorder is implemented in native Vala. The application has no Python runtime dependency; the Python scripts in this directory drive executable and mock-portal tests.
+StudioRecorder is implemented in native Vala. The application has no Python runtime dependency; the Python scripts in `tests/` drive executable and mock-portal tests.
 
 ## Build and run
 
@@ -13,10 +13,12 @@ make
 make run
 ```
 
+The executable is `./studio-recorder`; build intermediates and test executables live in `.obj/`.
+
 Launch the executable from another directory to save takes there:
 
 ```sh
-/path/to/studio/build/studio-recorder
+/path/to/studio/studio-recorder
 ```
 
 To inspect the interface without opening cameras, desktop sharing, or hardware encoders:
@@ -28,6 +30,8 @@ make run ARGS=--test-sources
 The window starts paused, with live previews and audio meters. Play opens a new take; Stop finalizes it and restores preview. Audio dropdowns are available while paused. Closing the window, Ctrl-C, and SIGTERM finalize an active take before exiting. Screen capture and computer audio are mandatory in normal operation; on Wayland, choose your primary monitor in the system chooser.
 
 ## Structure
+
+Application sources and VAPI declarations live in `src/`. Vala test programs and Python test drivers live in `tests/`. The synthetic input factories stay in `src/test-sources.vala` because the application uses them for `--test-sources`.
 
 - `Application.vala`: GTK interface, transport state, audio changes, discovery worker, and shutdown. The small `Thumbnail` widget holder, `TransportState` enum, and Vala RMS-to-meter helper stay alongside their owner.
 - `Input.vala`: capture-input metadata and source construction.
@@ -58,5 +62,3 @@ Requires `ffprobe`, `ffmpeg`, `dbus-run-session`, Python/PyGObject for the isola
 Validated locally: all 15 Vala/black-box/portal scenarios passed; a synthetic GTK preview/record/finalize smoke test also passed.
 
 Real cameras, portal behavior on actual Wayland desktops, hardware encoder allocation, and long-duration synchronization require separate hardware validation. Historical hardware smoke-test results from the retired implementation do not validate the current application. Native libraries and plugins are still required at runtime. Vala 0.56 generates C qualifier warnings against newer GLib/GTK headers; the audio-meter helper also accesses a deprecated type because that is what the level plugin publishes.
-
-The previous `make vala`, `make run-vala`, and `make test-vala` targets remain aliases for `make`, `make run`, and `make test`.

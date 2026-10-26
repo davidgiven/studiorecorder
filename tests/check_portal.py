@@ -10,7 +10,7 @@ if "--inside" not in sys.argv:
 
 from gi.repository import Gio, GLib
 
-BINARY = Path(__file__).resolve().parents[1] / "build/test-vala-portal"
+BINARY = Path(__file__).resolve().parents[1] / ".obj/test-portal"
 BUS = "org.freedesktop.portal.Desktop"
 PATH = "/org/freedesktop/portal/desktop"
 XML = """<node><interface name="org.freedesktop.portal.ScreenCast">

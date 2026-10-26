@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-BINARY = Path(__file__).resolve().parents[1] / "build/studio-recorder"
+BINARY = Path(__file__).resolve().parents[1] / "studio-recorder"
 
 
 class ValaRecordingTests(unittest.TestCase):

@@ -12,4 +12,30 @@ The UI has a large selected preview and clickable thumbnails with overlaid audio
 
 See [README.md](README.md) for dependencies, usage, and checks, and [DESIGN.md](DESIGN.md) for current architecture, validation limits, and future work. The implementation currently rebuilds capture pipelines at recording transitions and audio changes; saved settings, hotplug recovery, and seamless recording-branch transitions remain future work.
 
-In Vala code, annotate every argument of a multiline function, method, or constructor call with a preceding `/* parameter_name= */` comment. Use the parameter name from the declaration; for variadic arguments, use a meaningful name describing the value's role or the GObject property being set. Keep annotations accurate when changing calls, including calls in tests, and preserve them when running `make format`.
+## Source layout and native APIs
+
+Application sources and VAPI declarations live in `src/`. Put each major class in its own file named after the class; trivial helpers may stay beside their users. Application types live at the top level without a custom application namespace. Keep external bindings grouped in `Native` and `V4L2`.
+
+Use existing Vala/POSIX bindings or small VAPI declarations for native APIs. `Native.xinit_threads()` binds directly to Xlib, filesystem link resolution uses `Posix.realpath()`, and camera control logic lives in `src/camera-controls.vala` with typed Linux declarations in `src/v4l2.vapi`. There are no handwritten C helpers. Initialize Xlib threading before GTK/GStreamer uses X11. Keep GTK work on the main loop; GStreamer owns its capture and media-processing threads.
+
+Vala test programs and Python test drivers live in `tests/`. Python is a test dependency only; do not restore the retired Python application. Keep synthetic input factories in `src/test-sources.vala`, since the application's explicit `--test-sources` mode uses them.
+
+## Build and checks
+
+- `make` builds `./studio-recorder` in the repository root.
+- `make run` launches the application; pass options through `ARGS`, for example `make run ARGS=--test-sources`.
+- `make test` builds and runs the Vala checks, executable recording tests, and private-D-Bus portal tests. These need ffprobe, ffmpeg, Python/PyGObject, dbus-run-session, and synthetic GStreamer plugins.
+- `make format` runs Uncrustify on Vala sources in both `src/` and `tests/` using `uncrustify.cfg`.
+- `make clean` removes `.obj/` and `studio-recorder`. Build intermediates and test executables belong in `.obj/`; recordings must not be cleaned.
+
+Use synthetic sources for automated recording checks. Do not treat synthetic or mocked portal results as hardware validation; document real-camera, screen-capture, and encoder validation separately.
+
+## Code conventions
+
+Document every class, constructor, function, and method. Divide longer bodies into logical paragraphs separated by whitespace and comments explaining purpose, ownership, or lifecycle constraints.
+
+Use four-space indentation and Allman-style braces. Do not put spaces before function-call or function-declaration parentheses, including calls following `yield`. Put separate assignments and statements on separate lines. Indent switch bodies and case bodies, and leave blank lines between a clause's `break` and the next case. Do not put a first statement beside its case label unless the complete clause, including `break`, fits on that line; separate lines are always acceptable.
+
+For multiline calls, put the first argument on the line after the opening parenthesis and each subsequent argument on its own line. Multiline lambda bodies start on the line after the opening brace and are indented one level inside it.
+
+Annotate every argument of a multiline function, method, or constructor call with a preceding `/* parameter_name= */` comment on the same line as its value. Use the parameter name from the declaration; for variadic arguments, use a meaningful name describing the value's role or the GObject property being set. Use member-name comments for multiline struct initializers, with each member value on its own line. Keep annotations accurate when changing calls, including calls in tests, and preserve them when running `make format`.

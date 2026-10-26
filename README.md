@@ -9,13 +9,15 @@ make
 make run
 ```
 
+The executable is `./studio-recorder`; build intermediates and test executables live in `.obj/`.
+
 To save recordings elsewhere, launch the compiled executable from the destination directory:
 
 ```sh
-/path/to/studio/build/studio-recorder
+/path/to/studio/studio-recorder
 ```
 
-See [vala/README.md](vala/README.md) for the source guide and development details. `make test` runs the checks, and `make format` applies the repository's Uncrustify configuration. The application does not require Python; Python is used only by test drivers.
+See [src/README.md](src/README.md) for the source guide and development details. `make test` runs the checks, and `make format` applies the repository's Uncrustify configuration. The application does not require Python; Python is used only by test drivers.
 
 It discovers cameras through PipeWire, matches microphones using physical USB identity, and previews every discovered camera and its associated audio, plus primary-monitor capture and computer audio. It starts stopped and creates no output until Play is pressed. A screen-only session works even without a webcam. Physical V4L2 webcams are opened directly through `v4l2src` using their advertised device path; other camera types use their provider's capture element. Named audio inputs use `pulsesrc` through the PulseAudio-compatible service, with provider capture as a fallback when a node name is unavailable. It writes one timestamped `StudioRecorder_*.mkv` in the current directory, containing independent H.264 video tracks and deduplicated, uncompressed float32 PCM audio tracks. Track names/comments identify sources and audio associations.
 
@@ -60,7 +62,7 @@ Check individual elements with `gst-inspect-1.0 gtk4paintablesink` or `gst-inspe
 A separate synthetic mode uses two test cameras, one shared test microphone, a screen source, computer audio, and the native software `x264enc` plugin. It never accesses capture devices. Headless operation and automatic stop duration are development options only. An explicit `--duration` synthetic run automatically starts one take after preview initialization and exits when its duration expires; normal launches always start stopped:
 
 ```sh
-./build/studio-recorder --test-sources --headless --duration 3
+./studio-recorder --test-sources --headless --duration 3
 make test
 ```
 

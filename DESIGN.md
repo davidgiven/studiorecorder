@@ -12,19 +12,29 @@ The large preview displays the selected source. Clicking a thumbnail changes onl
 
 Audio meters overlay thumbnail images. The main preview's top-left overlay shows the selected source's negotiated target FPS and actual post-encoding recording FPS. Actual FPS is a ten-second rolling average of complete encoded video frames, refreshed every quarter-second. It uses available sampling time during warmup, resets for each take, and shows a dash while paused. The measurement comes from the recording branch and is independent of preview frame delivery. It measures encoder output throughput, not physical sensor synchronization or durable disk writes.
 
+## Source and build layout
+
+`src/` contains the Vala application and its native API declarations. `tests/` contains Vala test entry points and Python test drivers. Python is required only for the test drivers; the retired Python application and its packaging have been removed. Each major application class has a matching source filename, and small helpers remain beside their users. Application types have no custom namespace; external API declarations use `Native` and `V4L2`.
+
+The default `make` target builds `./studio-recorder`; `make run` launches it with optional `ARGS`. Compiler working directories are `.obj/app`, `.obj/unit`, and `.obj/portal`. Test executables are `.obj/test-unit` and `.obj/test-portal`. `make test` builds and runs all test groups. `make format` formats `src/*.vala` and `tests/*.vala` with the checked-in Uncrustify configuration. `make clean` removes `.obj/` and the root executable, leaving recordings intact.
+
 ## Components and ownership
 
 | Module | Current responsibility |
 | --- | --- |
-| `Application.vala` | GTK UI, transport state, audio assignment, timers, bus events, pipeline rebuilds, and shutdown. |
-| `Input.vala`, `Camera.vala`, `Registry.vala` | Input models, source construction, PipeWire discovery, and physical camera/audio association. |
-| `DesktopCapture.vala` | Primary-monitor capture on X11, single-monitor portal capture on Wayland, computer audio, and portal lifetime. |
-| `Recorder.vala` | Capture/recording graph, hardware encoder selection, MKV output, track tags, and finalization. |
-| `VideoTrack.vala`, `RollingFramerate.vala` | Negotiated video formats, native encoded-frame counters, and rolling FPS. |
-| `camera-controls.vala`, `v4l2.vapi` | Best-effort camera frame-rate locking through the source's open V4L2 descriptor and typed Linux API declarations. |
-| `capture-utils.vala`, `test-sources.vala`, `main.vala` | Shared element construction, explicit synthetic inputs, command-line handling, and initialization. |
+| `src/Application.vala` | GTK UI, transport state, audio assignment, timers, bus events, pipeline rebuilds, and shutdown. |
+| `src/Input.vala`, `src/Camera.vala`, `src/Registry.vala` | Input models, source construction, PipeWire discovery, and physical camera/audio association. |
+| `src/DesktopCapture.vala` | Primary-monitor capture on X11, single-monitor portal capture on Wayland, computer audio, and portal lifetime. |
+| `src/Recorder.vala` | Capture/recording graph, hardware encoder selection, MKV output, track tags, and finalization. |
+| `src/VideoTrack.vala`, `src/RollingFramerate.vala` | Negotiated video formats, native encoded-frame counters, and rolling FPS. |
+| `src/camera-controls.vala`, `src/v4l2.vapi` | Best-effort camera frame-rate locking through the source's open V4L2 descriptor and typed Linux API declarations. |
+| `src/capture-utils.vala`, `src/test-sources.vala`, `src/main.vala` | Shared element construction, explicit synthetic inputs, command-line handling, and initialization. |
+| `src/native.vapi` | Direct Xlib `XInitThreads` binding. |
+| `tests/tests.vala` | GLib unit and synthetic pipeline/transport checks. |
+| `tests/check_recording.py` | Executes the root binary, inspects and decodes saved tracks, and checks startup/options/signals. |
+| `tests/portal-test.vala`, `tests/check_portal.py` | Native portal client plus an isolated mock D-Bus service. |
 
-Each major class has its own source file. Small helpers remain alongside their users. Native APIs are called through VAPI declarations and existing POSIX bindings; there are no handwritten C helpers. See [vala/README.md](vala/README.md) for build and validation details.
+The `Thumbnail` widget holder and RMS-to-meter helper stay with `Application`; `Geometry` stays with desktop capture, and `FrameSample` stays with `RollingFramerate`. Native APIs are called through VAPI declarations and existing POSIX bindings; there are no handwritten C helpers. `Registry` uses `Posix.realpath()` to resolve sysfs ancestry. See [src/README.md](src/README.md) for build and validation details.
 
 GTK updates and transport transitions run on the main loop. Device discovery runs in a worker so waiting on desktop services does not freeze the window. GStreamer bus messages are dispatched on the main loop. An audio change defers preview reconstruction until after the dropdown notification returns, using normal GLib priority: ordinary idle priority can be starved by continuous preview redraws.
 
@@ -42,7 +52,7 @@ Current identities use provider object paths, node names, or display names as a 
 
 Screen capture and computer audio are required inputs, including when no webcam is connected.
 
-On X11, `xrandr --query` identifies the active primary monitor. `ximagesrc` captures its pixel rectangle, including the pointer, rather than the entire multi-monitor desktop. If only one monitor is active, it is used even without a primary flag. Multiple active monitors without a configured primary cause startup to fail. X11 threading is initialized before GTK and capture start.
+On X11, `xrandr --query` identifies the active primary monitor. `ximagesrc` captures its pixel rectangle, including the pointer, rather than the entire multi-monitor desktop. If only one monitor is active, it is used even without a primary flag. Multiple active monitors without a configured primary cause startup to fail. Xlib threading is initialized through the direct `XInitThreads` binding before GTK and capture start. This enables process-wide Xlib locking; GStreamer owns the capture threads, and GTK still runs on the main thread.
 
 On Wayland, the ScreenCast portal creates a session, requests single-monitor selection, waits for user consent, and provides a PipeWire remote descriptor and stream target. The portable portal API cannot automatically identify/select the primary monitor, so the user must select it in the chooser. Multiple returned streams are rejected. The portal descriptor and session remain alive until application shutdown; cancellation, denial, or session closure fails capture. The media startup timeout does not run while the user is choosing a monitor.
 
@@ -72,11 +82,13 @@ Preview queues are leaky and bounded to 200 ms. Recording queues are non-leaky a
 
 Native scaling allows input dimensions beyond the encoder's limits to negotiate a supported recording size. Thumbnail resolution describes capture/preview dimensions, which can differ from encoded dimensions. Efficient GPU-memory paths and optimal capture-mode selection remain future performance work.
 
-`level` posts channel RMS/peak measurements every 50 ms. The current thumbnail bar displays the largest channel RMS mapped from -60 to 0 dBFS. Separate channel bars, peak hold, and clipping indicators are not implemented. The meter uses the same converted audio path as recording and applies no UI gain or downmix.
+`level` posts channel RMS/peak measurements every 50 ms. The current thumbnail bar displays the largest channel RMS mapped from -60 to 0 dBFS. The Vala `level_rms()` helper borrows the message's legacy boxed `GLib.ValueArray`, ignores non-finite readings, and clamps the meter to its display range. It processes channel statistics, not audio samples. Separate channel bars, peak hold, and clipping indicators are not implemented. The meter uses the same converted audio path as recording and applies no UI gain or downmix.
 
 Recording FPS uses `identity` statistics after H.264 parsing with access-unit alignment, counting complete encoded frames without application per-frame callbacks. Timestamped cumulative counts feed a bounded ten-second history; the rolling window interpolates its boundary between samples when UI timing is irregular. Counter or clock resets start a new history.
 
 ## Camera frame-rate locking
+
+The Vala `lock_framerate()` function connects the typed plugin signal before capture begins, retaining only a source-name string in the closure to avoid an ownership cycle. Kernel headers provide the actual ioctl request values and struct layouts through `src/v4l2.vapi`.
 
 Before V4L2 format negotiation, the source's `prepare-format` callback queries `V4L2_CID_EXPOSURE_AUTO_PRIORITY` and sets it to zero when writable. This disables exposure-driven dynamic frame-rate changes while preserving the current exposure mode. The numeric control ID handles driver naming differences such as `exposure_dynamic_framerate` and `exposure_auto_priority`.
 
@@ -109,7 +121,7 @@ Media startup has a 30-second timeout; finalization has a ten-second timeout. Pi
 
 ## Validation to date
 
-The current implementation has 15 automated checks covering RMS-to-meter conversion, the actual v4l2src callback with an invalid descriptor, primary-monitor geometry, rolling encoded FPS, paused startup, multiple takes, audio changes and recording-time locking, resistance to GLib idle starvation, output codecs/tags, decoding every track, command-line validation, SIGINT/SIGTERM finalization, and portal consent/descriptor lifetime. Recording integration uses synthetic sources and native software H.264; `ffprobe`/`ffmpeg` inspect and decode the files. Portal tests use a private D-Bus with a mock service, including responses arriving before method replies and pending-request cancellation.
+The current implementation has 15 automated checks: six Vala GLib tests, four executable recording tests, and five private-D-Bus portal scenarios. They cover RMS-to-meter conversion, the actual v4l2src callback with an invalid descriptor, primary-monitor geometry, rolling encoded FPS, paused startup, multiple takes, audio changes and recording-time locking, resistance to GLib idle starvation, output codecs/tags, decoding every track, command-line validation, SIGINT/SIGTERM finalization, and portal consent/descriptor lifetime. Recording integration uses synthetic sources and native software H.264; `ffprobe`/`ffmpeg` inspect and decode the files. Portal tests use a private D-Bus with a mock service, including responses arriving before method replies and pending-request cancellation.
 
 A synthetic GTK preview/record/finalize smoke test also passed. Real X11 and Wayland capture, physical camera control writes, hardware encoder allocation, additional GPU backends, multi-camera limits, editor interoperability, long takes, drift, disk exhaustion, and unplug behavior still need validation of the Vala application.
 
