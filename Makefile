@@ -1,12 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: run test
-
-run:
-	$(PYTHON) -m studio_recorder
-
-test:
-	$(PYTHON) -m unittest discover -s tests -v
+.DEFAULT_GOAL := all
 
 VALAC ?= valac
 UNCRUSTIFY ?= uncrustify
@@ -17,13 +11,19 @@ VALA_CORE = $(VALA_CAPTURE) vala/Registry.vala vala/test-sources.vala \
 VALA_NATIVE = vala/native.vapi vala/v4l2.vapi
 VALA_FLAGS = -g $(VALA_PACKAGES) -X -Ivala -X -lX11 -X -lm
 
-.PHONY: vala run-vala test-vala format
+.PHONY: all run test vala run-vala test-vala format
+all: build/studio-recorder
+
 format:
 	$(UNCRUSTIFY) -c uncrustify.cfg -l VALA --replace --no-backup $(wildcard vala/*.vala)
 
-vala: build/studio-recorder-vala
+vala: all
 
-build/studio-recorder-vala: $(VALA_CORE) $(VALA_NATIVE) vala/main.vala
+run-vala: run
+
+test-vala: test
+
+build/studio-recorder: $(VALA_CORE) $(VALA_NATIVE) vala/main.vala
 	mkdir -p build/app
 	$(VALAC) $(VALA_FLAGS) --directory build/app -o $(abspath $@) $(VALA_CORE) $(VALA_NATIVE) vala/main.vala
 
@@ -31,10 +31,10 @@ build/test-vala: $(VALA_CORE) $(VALA_NATIVE) vala/tests.vala
 	mkdir -p build/unit
 	$(VALAC) $(VALA_FLAGS) --directory build/unit -o $(abspath $@) $(VALA_CORE) $(VALA_NATIVE) vala/tests.vala
 
-run-vala: vala
-	./build/studio-recorder-vala $(ARGS)
+run: all
+	./build/studio-recorder $(ARGS)
 
-test-vala: vala build/test-vala build/test-vala-portal
+test: all build/test-vala build/test-vala-portal
 	G_DEBUG=fatal-criticals ./build/test-vala
 	$(PYTHON) vala/check_recording.py
 	$(PYTHON) vala/check_portal.py

@@ -1,1 +1,0 @@
-"""StudioRecorder desktop application."""

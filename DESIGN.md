@@ -2,29 +2,29 @@
 
 This document describes the current implementation and identifies remaining work separately. [AGENTS.md](AGENTS.md) gives the project requirements; [README.md](README.md) covers running the application and dependencies.
 
-## Vala port
-
-An independent Vala implementation lives in `vala/`, with the same native GStreamer pipeline architecture and transport behavior. It uses typed GObject models, signals, async portal operations, and a small C helper for Linux/legacy APIs. The Python implementation remains available for comparison. See [vala/README.md](vala/README.md) for build instructions, module responsibilities, checks, and port-specific validation limits. Hardware validation reported elsewhere in this document applies to the Python implementation unless explicitly stated.
-
 ## Current behavior
 
-StudioRecorder is a local Linux multitrack recorder implemented in Python with PyGObject, GTK 4, GLib, and GStreamer. Capture, decoding, conversion, scaling, hardware encoding, metering, and muxing run in native GStreamer elements. Python coordinates devices, pipeline lifecycle, and UI updates; it does not process individual video frames or audio samples.
+StudioRecorder is a local Linux multitrack recorder implemented in Vala with GTK 4, GLib, and GStreamer. Capture, decoding, conversion, scaling, hardware encoding, metering, and muxing run in native GStreamer elements. Vala coordinates devices, pipeline lifecycle, and UI updates; it does not process individual video frames or audio samples.
 
 The application starts stopped, with live camera and screen previews and audio meters. No recording file is created until Play is pressed. A control bar between the main preview and thumbnails contains Play/Stop and prominent red PAUSED text, replaced by HH:MM:SS elapsed time during recording. Each Play creates a separate timestamped MKV in the working directory. Stop drains and closes that take before returning to live preview. Controls prevent overlapping take transitions.
 
 The large preview displays the selected source. Clicking a thumbnail changes only the displayed source, including during recording. Each preview button has a centered resolution/target-FPS summary above the image and its source name below the image. An audio dropdown beneath the button selects a discovered input, Computer audio, or No audio. Dropdowns are enabled only while paused. Assignments survive pipeline rebuilds and subsequent takes within the current run, but are not saved across application launches.
 
-Audio meters overlay thumbnail images. The main preview's top-left overlay shows the selected source's negotiated target FPS and actual post-encoding recording FPS. Actual FPS is a ten-second rolling average of complete encoded video frames, refreshed every half-second. It uses available sampling time during warmup, resets for each take, and shows a dash while paused. The measurement comes from the recording branch and is independent of preview frame delivery. It measures encoder output throughput, not physical sensor synchronization or durable disk writes.
+Audio meters overlay thumbnail images. The main preview's top-left overlay shows the selected source's negotiated target FPS and actual post-encoding recording FPS. Actual FPS is a ten-second rolling average of complete encoded video frames, refreshed every quarter-second. It uses available sampling time during warmup, resets for each take, and shows a dash while paused. The measurement comes from the recording branch and is independent of preview frame delivery. It measures encoder output throughput, not physical sensor synchronization or durable disk writes.
 
 ## Components and ownership
 
 | Module | Current responsibility |
 | --- | --- |
-| `app.py` | GTK UI, transport state, audio assignment, timers, bus events, pipeline rebuilds, and shutdown. |
-| `devices.py` | PipeWire discovery, physical camera/audio association, source construction, and synthetic development sources. |
-| `desktop.py` | Primary-monitor capture on X11, single-monitor portal capture on Wayland, computer audio, and portal resource lifetime. |
-| `media.py` | Capture/recording graph, hardware encoder selection, MKV output, track tags, counters, and rolling FPS calculation. |
-| `v4l2.py` | Best-effort camera frame-rate locking through the source's open V4L2 descriptor. |
+| `Application.vala` | GTK UI, transport state, audio assignment, timers, bus events, pipeline rebuilds, and shutdown. |
+| `Input.vala`, `Camera.vala`, `Registry.vala` | Input models, source construction, PipeWire discovery, and physical camera/audio association. |
+| `DesktopCapture.vala` | Primary-monitor capture on X11, single-monitor portal capture on Wayland, computer audio, and portal lifetime. |
+| `Recorder.vala` | Capture/recording graph, hardware encoder selection, MKV output, track tags, and finalization. |
+| `VideoTrack.vala`, `RollingFramerate.vala` | Negotiated video formats, native encoded-frame counters, and rolling FPS. |
+| `camera-controls.vala`, `v4l2.vapi` | Best-effort camera frame-rate locking through the source's open V4L2 descriptor and typed Linux API declarations. |
+| `capture-utils.vala`, `test-sources.vala`, `main.vala` | Shared element construction, explicit synthetic inputs, command-line handling, and initialization. |
+
+Each major class has its own source file. Small helpers remain alongside their users. Native APIs are called through VAPI declarations and existing POSIX bindings; there are no handwritten C helpers. See [vala/README.md](vala/README.md) for build and validation details.
 
 GTK updates and transport transitions run on the main loop. Device discovery runs in a worker so waiting on desktop services does not freeze the window. GStreamer bus messages are dispatched on the main loop. An audio change defers preview reconstruction until after the dropdown notification returns, using normal GLib priority: ordinary idle priority can be starved by continuous preview redraws.
 
@@ -74,7 +74,7 @@ Native scaling allows input dimensions beyond the encoder's limits to negotiate 
 
 `level` posts channel RMS/peak measurements every 50 ms. The current thumbnail bar displays the largest channel RMS mapped from -60 to 0 dBFS. Separate channel bars, peak hold, and clipping indicators are not implemented. The meter uses the same converted audio path as recording and applies no UI gain or downmix.
 
-Recording FPS uses `identity` statistics after H.264 parsing with access-unit alignment, counting complete encoded frames without Python handoff callbacks. Timestamped cumulative counts feed a bounded ten-second history; the rolling window interpolates its boundary between samples when UI timing is irregular. Counter or clock resets start a new history.
+Recording FPS uses `identity` statistics after H.264 parsing with access-unit alignment, counting complete encoded frames without application per-frame callbacks. Timestamped cumulative counts feed a bounded ten-second history; the rolling window interpolates its boundary between samples when UI timing is irregular. Counter or clock resets start a new history.
 
 ## Camera frame-rate locking
 
@@ -109,11 +109,11 @@ Media startup has a 30-second timeout; finalization has a ten-second timeout. Pi
 
 ## Validation to date
 
-The automated suite currently has 32 tests covering source routing, primary-monitor selection, portal request policy/resource cleanup, rolling FPS, V4L2 locking/fallback behavior, paused startup without files, multiple takes, audio reassignment and recording-time locking, resistance to GLib idle starvation, encoded-rate measurement without preview, output codecs/tags, decoding all tracks, startup diagnostics, and Stop/exit finalization. Media integration tests use synthetic sources and native software H.264 encoding; `ffprobe`/`ffmpeg` inspect and decode the files.
+The current implementation has 15 automated checks covering RMS-to-meter conversion, the actual v4l2src callback with an invalid descriptor, primary-monitor geometry, rolling encoded FPS, paused startup, multiple takes, audio changes and recording-time locking, resistance to GLib idle starvation, output codecs/tags, decoding every track, command-line validation, SIGINT/SIGTERM finalization, and portal consent/descriptor lifetime. Recording integration uses synthetic sources and native software H.264; `ffprobe`/`ffmpeg` inspect and decode the files. Portal tests use a private D-Bus with a mock service, including responses arriving before method replies and pending-request cancellation.
 
-Manual X11 smoke tests have exercised a C920 webcam, primary-monitor capture, webcam microphone, stereo computer audio, NVIDIA H.264 encoding, previews, successive takes, and audio selector recovery. With dynamic frame rate enabled, the camera delivered about 24 FPS despite 30 FPS caps. Disabling it shortened auto exposure from about 41.6 ms to 33.3 ms; the final four seconds of the test recording measured 30.0 FPS. These are results for the tested configuration, not universal hardware guarantees.
+A synthetic GTK preview/record/finalize smoke test also passed. Real X11 and Wayland capture, physical camera control writes, hardware encoder allocation, additional GPU backends, multi-camera limits, editor interoperability, long takes, drift, disk exhaustion, and unplug behavior still need validation of the Vala application.
 
-Wayland portal behavior has automated mocked coverage. A real Wayland startup smoke test with an HP Wide Vision HD camera reached live-preview readiness and exited cleanly; Wayland recording transitions still need validation. Additional GPU backends, multi-camera bandwidth/encoder limits, editor interoperability, long takes, drift, disk exhaustion, and unplug behavior need hardware validation.
+Historical hardware tests of the retired Python implementation exercised a C920 webcam, NVIDIA H.264, primary-monitor capture, webcam and stereo computer audio, multiple takes, and audio switching on X11; a Wayland startup test with an HP Wide Vision HD camera reached preview readiness. Those results informed the architecture but do not validate the current Vala implementation.
 
 ## Future work
 

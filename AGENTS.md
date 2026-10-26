@@ -1,6 +1,6 @@
 # StudioRecorder
 
-StudioRecorder is a Python desktop application for multitrack recording on Linux, using PyGObject, GTK 4, GLib, and GStreamer. Keep media processing in native GStreamer elements rather than processing video frames or audio samples in Python.
+StudioRecorder is a Vala desktop application for multitrack recording on Linux, using GTK 4, GLib, and GStreamer. Keep media processing in native GStreamer elements rather than processing video frames or audio samples in Vala.
 
 Discover available cameras and audio inputs, associate camera microphones by physical device identity where possible, and allow manual audio selection while paused. Always include primary-monitor capture and computer audio from the default output monitor. X11 capture uses only the primary monitor; Wayland uses the system screen-sharing chooser with one monitor, which the user must select as primary.
 
@@ -12,4 +12,4 @@ The UI has a large selected preview and clickable thumbnails with overlaid audio
 
 See [README.md](README.md) for dependencies, usage, and checks, and [DESIGN.md](DESIGN.md) for current architecture, validation limits, and future work. The implementation currently rebuilds capture pipelines at recording transitions and audio changes; saved settings, hotplug recovery, and seamless recording-branch transitions remain future work.
 
-In the Vala port, annotate every argument of a multiline function, method, or constructor call with a preceding `/* parameter_name= */` comment. Use the parameter name from the declaration; for variadic arguments, use a meaningful name describing the value's role or the GObject property being set. Keep annotations accurate when changing calls, including calls in tests, and preserve them when running `make format`.
+In Vala code, annotate every argument of a multiline function, method, or constructor call with a preceding `/* parameter_name= */` comment. Use the parameter name from the declaration; for variadic arguments, use a meaningful name describing the value's role or the GObject property being set. Keep annotations accurate when changing calls, including calls in tests, and preserve them when running `make format`.
