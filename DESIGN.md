@@ -2,6 +2,10 @@
 
 This document describes the current implementation and identifies remaining work separately. [AGENTS.md](AGENTS.md) gives the project requirements; [README.md](README.md) covers running the application and dependencies.
 
+## Vala port
+
+An independent Vala implementation lives in `vala/`, with the same native GStreamer pipeline architecture and transport behavior. It uses typed GObject models, signals, async portal operations, and a small C helper for Linux/legacy APIs. The Python implementation remains available for comparison. See [vala/README.md](vala/README.md) for build instructions, module responsibilities, checks, and port-specific validation limits. Hardware validation reported elsewhere in this document applies to the Python implementation unless explicitly stated.
+
 ## Current behavior
 
 StudioRecorder is a local Linux multitrack recorder implemented in Python with PyGObject, GTK 4, GLib, and GStreamer. Capture, decoding, conversion, scaling, hardware encoding, metering, and muxing run in native GStreamer elements. Python coordinates devices, pipeline lifecycle, and UI updates; it does not process individual video frames or audio samples.

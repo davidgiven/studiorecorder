@@ -2,6 +2,8 @@
 
 A Python/GStreamer application for multitrack recording on a Linux desktop.
 
+A native **Vala port** is available alongside the Python implementation: see [vala/README.md](vala/README.md). Build it with `make vala`, launch it with `make run-vala`, or inspect it without capture devices with `make run-vala ARGS=--test-sources`. Run its checks with `make test-vala`.
+
 Launch the application from the directory where recordings should be saved:
 
 ```sh

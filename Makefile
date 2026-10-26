@@ -7,3 +7,36 @@ run:
 
 test:
 	$(PYTHON) -m unittest discover -s tests -v
+
+VALAC ?= valac
+UNCRUSTIFY ?= uncrustify
+VALA_PACKAGES = --pkg gtk4 --pkg gstreamer-1.0 --pkg gio-unix-2.0 --pkg posix
+VALA_CORE = vala/devices.vala vala/desktop.vala vala/media.vala vala/app.vala
+VALA_NATIVE = vala/native.vapi vala/native.c
+VALA_FLAGS = -g $(VALA_PACKAGES) -X -Ivala -X -lX11 -X -lm
+
+.PHONY: vala run-vala test-vala format
+format:
+	$(UNCRUSTIFY) -c uncrustify.cfg -l VALA --replace --no-backup $(wildcard vala/*.vala)
+
+vala: build/studio-recorder-vala
+
+build/studio-recorder-vala: $(VALA_CORE) $(VALA_NATIVE) vala/native.h vala/main.vala
+	mkdir -p build/app
+	$(VALAC) $(VALA_FLAGS) --directory build/app -o $(abspath $@) $(VALA_CORE) $(VALA_NATIVE) vala/main.vala
+
+build/test-vala: $(VALA_CORE) $(VALA_NATIVE) vala/native.h vala/tests.vala
+	mkdir -p build/unit
+	$(VALAC) $(VALA_FLAGS) --directory build/unit -o $(abspath $@) $(VALA_CORE) $(VALA_NATIVE) vala/tests.vala
+
+run-vala: vala
+	./build/studio-recorder-vala $(ARGS)
+
+test-vala: vala build/test-vala build/test-vala-portal
+	G_DEBUG=fatal-criticals ./build/test-vala
+	$(PYTHON) vala/check_recording.py
+	$(PYTHON) vala/check_portal.py
+
+build/test-vala-portal: vala/devices.vala vala/desktop.vala $(VALA_NATIVE) vala/native.h vala/portal-test.vala
+	mkdir -p build/portal
+	$(VALAC) $(VALA_FLAGS) --directory build/portal -o $(abspath $@) vala/devices.vala vala/desktop.vala $(VALA_NATIVE) vala/portal-test.vala
