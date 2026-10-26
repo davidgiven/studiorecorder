@@ -347,9 +347,7 @@ class Application:
         if self.done:
             return
         if message.type == Gst.MessageType.ERROR:
-            error, debug = message.parse_error()
-            print(f"GStreamer: {debug}", file=sys.stderr, flush=True)
-            self.fail(f"{message.src.name}: {error.message}")
+            self.fail(self.recorder.describe_error(message))
         elif message.type == Gst.MessageType.EOS:
             if self.recorder.record:
                 self.complete_take(finalized=True)

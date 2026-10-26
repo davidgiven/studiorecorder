@@ -8,7 +8,7 @@ Launch the application from the directory where recordings should be saved:
 python3 -m studio_recorder
 ```
 
-It discovers cameras through PipeWire, matches microphones using physical USB identity, and previews every discovered camera and its associated audio, plus primary-monitor capture and computer audio. It starts stopped and creates no output until Play is pressed. A screen-only session works even without a webcam. Physical V4L2 webcams are opened directly through `v4l2src` using their advertised device path; other camera types and audio inputs use their provider's capture element. It writes one timestamped `StudioRecorder_*.mkv` in the current directory, containing independent H.264 video tracks and deduplicated, uncompressed float32 PCM audio tracks. Track names/comments identify sources and audio associations.
+It discovers cameras through PipeWire, matches microphones using physical USB identity, and previews every discovered camera and its associated audio, plus primary-monitor capture and computer audio. It starts stopped and creates no output until Play is pressed. A screen-only session works even without a webcam. Physical V4L2 webcams are opened directly through `v4l2src` using their advertised device path; other camera types use their provider's capture element. Named audio inputs use `pulsesrc` through the PulseAudio-compatible service, with provider capture as a fallback when a node name is unavailable. It writes one timestamped `StudioRecorder_*.mkv` in the current directory, containing independent H.264 video tracks and deduplicated, uncompressed float32 PCM audio tracks. Track names/comments identify sources and audio associations.
 
 ## Preview and recording controls
 
@@ -44,7 +44,7 @@ Use the distribution's Python 3.11+ and install matching system packages for:
 
 Distribution package names vary. Install PyGObject and media dependencies through system packages; `pip` alone does not supply GTK, GStreamer plugins, or hardware drivers. An optional `pip install -e . --no-deps` installs the `studio-recorder` command when the system dependencies are already available.
 
-Check individual elements with `gst-inspect-1.0 gtk4paintablesink` or `gst-inspect-1.0 vah264enc`. Finding an encoder plugin does not guarantee the driver can allocate every requested encoder session; starting a take reports negotiation/allocation failures. Preview-only mode does not allocate a hardware encoder. There is no automatic software fallback in normal operation.
+Check individual elements with `gst-inspect-1.0 gtk4paintablesink` or `gst-inspect-1.0 vah264enc`. Finding an encoder plugin does not guarantee the driver can allocate every requested encoder session; starting a take reports negotiation/allocation failures. Preview-only mode does not allocate a hardware encoder. A live-preview startup failure therefore concerns capture, audio, or rendering; the lines below the error summary identify the failing GStreamer element. The previous summary displayed `encoder: None` for this case. There is no automatic software fallback in normal operation.
 
 ## Development checks
 
@@ -55,7 +55,7 @@ python3 -m studio_recorder --test-sources --headless --duration 3
 python3 -m unittest discover -s tests -v
 ```
 
-The suite currently contains 27 tests. Media integration tests require `ffprobe` and `ffmpeg`; without them, those checks are skipped. They inspect and decode the camera/screen video and float32 audio tracks, check embedded identification tags, verify stopped startup without files and separate files across takes, exercise paused-only audio selection and busy-preview scheduling, and confirm post-encoding FPS measurement without preview. Other tests cover device routing, primary-monitor selection, mocked portal behavior, rolling-average boundaries, and camera frame-rate locking/fallbacks.
+The suite currently contains 31 tests. Media integration tests require `ffprobe` and `ffmpeg`; without them, those checks are skipped. They inspect and decode the camera/screen video and float32 audio tracks, check embedded identification tags, verify stopped startup without files and separate files across takes, exercise paused-only audio selection and busy-preview scheduling, and confirm post-encoding FPS measurement without preview. Other tests cover device routing, primary-monitor selection, mocked portal behavior, rolling-average boundaries, and camera frame-rate locking/fallbacks.
 
 Real X11 smoke tests have exercised a C920 webcam, primary-monitor capture, webcam audio, stereo computer audio, NVIDIA H.264, Play/Stop cycles, and audio switching. With camera frame-rate locking enabled, the final four seconds of a test file measured 30.0 FPS after exposure settled. Real Wayland capture, additional hardware encoder backends, and long-duration/multi-camera operation still need validation.
 

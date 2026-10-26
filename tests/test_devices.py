@@ -8,7 +8,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
-from studio_recorder.devices import Source
+from studio_recorder.devices import Source, v4l2_device_path
 
 
 class SourceTests(unittest.TestCase):
@@ -31,3 +31,24 @@ class SourceTests(unittest.TestCase):
         source = Source("Microphone", device, "usb-camera", "audio-node")
         self.assertIs(source.create_element(), device.create_element.return_value)
         device.create_element.assert_called_once_with(None)
+
+    def test_v4l2_paths_work_without_device_api_metadata(self):
+        for props in ({"api.v4l2.path": "/dev/video0"},
+                      {"device.path": "/dev/video0"},
+                      {"object.path": "v4l2:/dev/video0"}):
+            with self.subTest(props=props):
+                self.assertEqual(v4l2_device_path(props), "/dev/video0")
+
+    def test_pipewire_node_ids_are_not_used_as_v4l2_paths(self):
+        self.assertIsNone(v4l2_device_path({"device.path": "42", "object.path": "alsa:acp:Device:0:capture"}))
+
+    def test_named_audio_opens_exact_pulse_source(self):
+        if not Gst.ElementFactory.find("pulsesrc"):
+            self.skipTest("pulsesrc not installed")
+        device = Mock()
+        source = Source("Microphone", device, "usb-camera", "audio-node",
+                        audio_name="alsa_input.usb-camera.analog-stereo")
+        element = source.create_element()
+        self.assertEqual(element.get_factory().get_name(), "pulsesrc")
+        self.assertEqual(element.get_property("device"), "alsa_input.usb-camera.analog-stereo")
+        device.create_element.assert_not_called()

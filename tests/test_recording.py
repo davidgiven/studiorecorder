@@ -132,6 +132,31 @@ raise SystemExit(app.run())
 """
         self.verify_output(self.launch(code=code))
 
+    def test_preview_failure_reports_capture_device_without_blaming_encoder(self):
+        from studio_recorder.devices import Camera, Source
+        from studio_recorder.media import Gst, Recorder
+
+        Gst.init(None)
+        if not Gst.ElementFactory.find("v4l2src"):
+            self.skipTest("v4l2src not installed")
+        missing_device = "/dev/studio-recorder-nonexistent-camera"
+        camera = Camera(Source("Unavailable camera", None, None, "missing-camera", missing_device))
+        recorder = Recorder([camera], self.directory, preview=False, record=False)
+        try:
+            recorder.build()
+            with self.assertRaises(RuntimeError) as caught:
+                recorder.start()
+            diagnostic = str(caught.exception)
+            self.assertIn("Live preview pipeline could not start", diagnostic)
+            self.assertIn("no encoder is used while paused", diagnostic)
+            self.assertIn("v4l2src", diagnostic)
+            self.assertIn(missing_device, diagnostic)
+            self.assertIn("Video input 'Unavailable camera' [missing-camera]", diagnostic)
+            self.assertNotIn("encoder: None", diagnostic)
+            self.assertFalse(list(self.directory.glob("*.mkv*")))
+        finally:
+            recorder.close()
+
     def test_synchronous_startup_error_keeps_gstreamer_diagnostic(self):
         from studio_recorder.devices import test_cameras
         from studio_recorder.media import Gst, Recorder

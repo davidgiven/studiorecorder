@@ -83,6 +83,7 @@ class Recorder:
         self.recording_counters = {}
         self.video_caps_pads = {}
         self.level_sources = {}
+        self.source_labels = {}
         self.final_path = None
         self.partial_path = None
         self.started = False
@@ -137,6 +138,9 @@ class Recorder:
     def add_video(self, camera):
         source = camera.source.create_element()
         decoder = make("decodebin")
+        label = f"Video input {camera.source.name!r} [{camera.source.identity}]"
+        self.source_labels[source.name] = label
+        self.source_labels[decoder.name] = label
         tee = make("tee")
         self.add_chain(source, decoder)
         self.pipeline.add(tee)
@@ -231,6 +235,7 @@ class Recorder:
 
     def add_audio(self, source_info, cameras):
         source = source_info.create_element()
+        self.source_labels[source.name] = f"Audio input {source_info.name!r} [{source_info.identity}]"
         converter, resampler = make("audioconvert"), make("audioresample")
         raw_filter = caps("audio/x-raw,format=F32LE,layout=interleaved,rate=48000")
         meter = make("level", interval=50 * Gst.MSECOND, post_messages=True)
@@ -247,6 +252,22 @@ class Recorder:
             if not audio_queue.link(sink):
                 raise RuntimeError("Cannot attach audio meter preview")
 
+    def describe_error(self, message):
+        error, debug = message.parse_error()
+        element = message.src
+        label = None
+        while element is not None:
+            label = self.source_labels.get(element.name)
+            if label:
+                break
+            element = element.get_parent()
+        detail = f"{message.src.get_path_string()}: {error.message}"
+        if label:
+            detail = f"{label}\n{detail}"
+        if debug:
+            detail += f"\n{debug}"
+        return detail
+
     def start(self):
         result = self.pipeline.set_state(Gst.State.PLAYING)
         self.started = result != Gst.StateChangeReturn.FAILURE
@@ -256,13 +277,13 @@ class Recorder:
             errors = []
             bus = self.pipeline.get_bus()
             while (message := bus.pop_filtered(Gst.MessageType.ERROR)) is not None:
-                error, debug = message.parse_error()
-                detail = f"{message.src.get_path_string()}: {error.message}"
-                if debug:
-                    detail += f"\n{debug}"
-                errors.append(detail)
+                errors.append(self.describe_error(message))
             detail = "\n".join(errors) or "No GStreamer error was posted; rerun with GST_DEBUG=2 for driver and negotiation diagnostics."
-            raise RuntimeError(f"Capture pipeline could not start (encoder: {self.encoder}):\n{detail}")
+            if self.record:
+                summary = f"Recording pipeline could not start (encoder: {self.encoder})"
+            else:
+                summary = "Live preview pipeline could not start (no encoder is used while paused)"
+            raise RuntimeError(f"{summary}:\n{detail}")
 
     def stop(self):
         # There is no ongoing preview after this skeleton stops: EOS can drain

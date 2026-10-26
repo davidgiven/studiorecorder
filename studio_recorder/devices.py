@@ -19,6 +19,7 @@ class Source:
     physical_id: str | None
     identity: str
     video_path: str | None = None
+    audio_name: str | None = None
 
     def create_element(self):
         if self.video_path:
@@ -29,6 +30,14 @@ class Source:
                 raise RuntimeError("Missing GStreamer element: v4l2src")
             element.set_property("device", self.video_path)
             element.connect("prepare-format", lock_framerate)
+        elif self.audio_name:
+            element = Gst.ElementFactory.make("pulsesrc")
+            if element is None:
+                raise RuntimeError("Missing GStreamer element: pulsesrc")
+            # pipewire-pulse exposes source node names as PulseAudio device
+            # names. Avoid provider-created pipewiresrc numeric targets, which
+            # can become invalid across PipeWire/device-profile changes.
+            element.set_property("device", self.audio_name)
         else:
             element = self.device.create_element(None)
         if element is None:
@@ -50,6 +59,16 @@ def properties(device):
             for i in range(props.n_fields())}
 
 
+def v4l2_device_path(props):
+    # PipeWire versions expose different metadata; device.api is not always
+    # present. Only accept physical video paths, never arbitrary node IDs.
+    for key in ("api.v4l2.path", "device.path", "object.path"):
+        path = str(props.get(key, "")).removeprefix("v4l2:")
+        if re.fullmatch(r"/dev/video\d+", path):
+            return path
+    return None
+
+
 def usb_parent(path):
     """Return a physical USB device, rather than its audio/video interface."""
     resolved = Path(path).resolve()
@@ -60,7 +79,7 @@ def usb_parent(path):
 
 
 def physical_id(props):
-    video_path = props.get("api.v4l2.path") or props.get("device.path")
+    video_path = v4l2_device_path(props)
     if video_path:
         parent = usb_parent(Path("/sys/class/video4linux") / Path(str(video_path)).name / "device")
         if parent:
@@ -103,8 +122,10 @@ class Registry:
             if (kind, identity) in seen:
                 continue
             seen.add((kind, identity))
-            video_path = props.get("api.v4l2.path") if kind == "Video/Source" and props.get("device.api") == "v4l2" else None
-            source = Source(device.get_display_name(), device, physical_id(props), identity, video_path)
+            video_path = v4l2_device_path(props) if kind == "Video/Source" else None
+            audio_name = props.get("node.name") if kind == "Audio/Source" else None
+            source = Source(device.get_display_name(), device, physical_id(props), identity,
+                            video_path, audio_name)
             (videos if kind == "Video/Source" else audios).append(source)
         cameras = []
         self.audio_sources = sorted(audios, key=lambda source: (source.name, source.identity))
