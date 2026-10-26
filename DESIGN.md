@@ -46,7 +46,7 @@ Computer audio uses `pulsesrc device=@DEFAULT_MONITOR@` through PulseAudio or `p
 
 ## Capture and recording graphs
 
-Camera modes negotiate automatically. MJPEG or other compressed camera output passes through `decodebin` before the raw video tee. The current production codec is hardware H.264. Encoder factories are considered in this order: `vah264enc`, `vah264lpenc`, `nvh264enc`, `nvautogpuh264enc`, `qsvh264enc`, `vaapih264enc`, and `v4l2h264enc`. Factory availability selects a candidate; actual driver allocation and caps negotiation occur at pipeline startup. There is no automatic software fallback or retry with a different hardware backend after a startup failure.
+Camera modes negotiate automatically. MJPEG or other compressed camera output passes through `decodebin` before the raw video tee. PipeWire video sources have a `video/x-raw` caps filter before `decodebin`: their unrestricted caps otherwise allow audio negotiation and can cause a portal stream to fail with “target not found,” followed by blocked cleanup. The current production codec is hardware H.264. Encoder factories are considered in this order: `vah264enc`, `vah264lpenc`, `nvh264enc`, `nvautogpuh264enc`, `qsvh264enc`, `vaapih264enc`, and `v4l2h264enc`. Factory availability selects a candidate; actual driver allocation and caps negotiation occur at pipeline startup. There is no automatic software fallback or retry with a different hardware backend after a startup failure.
 
 ```text
 video input -> decodebin -> raw video tee
@@ -105,11 +105,11 @@ Media startup has a 30-second timeout; finalization has a ten-second timeout. Pi
 
 ## Validation to date
 
-The automated suite currently has 31 tests covering source routing, primary-monitor selection, portal request policy/resource cleanup, rolling FPS, V4L2 locking/fallback behavior, paused startup without files, multiple takes, audio reassignment and recording-time locking, resistance to GLib idle starvation, encoded-rate measurement without preview, output codecs/tags, decoding all tracks, startup diagnostics, and Stop/exit finalization. Media integration tests use synthetic sources and native software H.264 encoding; `ffprobe`/`ffmpeg` inspect and decode the files.
+The automated suite currently has 32 tests covering source routing, primary-monitor selection, portal request policy/resource cleanup, rolling FPS, V4L2 locking/fallback behavior, paused startup without files, multiple takes, audio reassignment and recording-time locking, resistance to GLib idle starvation, encoded-rate measurement without preview, output codecs/tags, decoding all tracks, startup diagnostics, and Stop/exit finalization. Media integration tests use synthetic sources and native software H.264 encoding; `ffprobe`/`ffmpeg` inspect and decode the files.
 
 Manual X11 smoke tests have exercised a C920 webcam, primary-monitor capture, webcam microphone, stereo computer audio, NVIDIA H.264 encoding, previews, successive takes, and audio selector recovery. With dynamic frame rate enabled, the camera delivered about 24 FPS despite 30 FPS caps. Disabling it shortened auto exposure from about 41.6 ms to 33.3 ms; the final four seconds of the test recording measured 30.0 FPS. These are results for the tested configuration, not universal hardware guarantees.
 
-Wayland portal behavior has automated mocked coverage but still needs a real Wayland desktop smoke test. Additional GPU backends, multi-camera bandwidth/encoder limits, editor interoperability, long takes, drift, disk exhaustion, and unplug behavior need hardware validation.
+Wayland portal behavior has automated mocked coverage. A real Wayland startup smoke test with an HP Wide Vision HD camera reached live-preview readiness and exited cleanly; Wayland recording transitions still need validation. Additional GPU backends, multi-camera bandwidth/encoder limits, editor interoperability, long takes, drift, disk exhaustion, and unplug behavior need hardware validation.
 
 ## Future work
 

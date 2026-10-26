@@ -142,7 +142,12 @@ class Recorder:
         self.source_labels[source.name] = label
         self.source_labels[decoder.name] = label
         tee = make("tee")
-        self.add_chain(source, decoder)
+        if source.get_factory().get_name() == "pipewiresrc":
+            # Portal sources advertise ANY. Constrain negotiation to video:
+            # decodebin also accepts audio, so it cannot supply this constraint.
+            self.add_chain(source, caps("video/x-raw"), decoder)
+        else:
+            self.add_chain(source, decoder)
         self.pipeline.add(tee)
         self.video_caps_pads[camera.source.identity] = tee.get_static_pad("sink")
 

@@ -8,13 +8,31 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
-from studio_recorder.devices import Source, v4l2_device_path
+from studio_recorder.devices import Camera, Source, v4l2_device_path
+from studio_recorder.media import Recorder
 
 
 class SourceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         Gst.init(None)
+
+    def test_pipewire_video_negotiation_excludes_audio(self):
+        if not Gst.ElementFactory.find("pipewiresrc"):
+            self.skipTest("pipewiresrc not installed")
+        element = Gst.ElementFactory.make("pipewiresrc")
+        device = Mock()
+        device.create_element.return_value = element
+        camera = Camera(Source("Portal screen", device, None, "screen"))
+        recorder = Recorder([camera], ".", preview=False, record=False)
+        self.addCleanup(recorder.close)
+        recorder.build()
+        # Test the formats offered back to the source, without opening a real
+        # portal connection. decodebin alone would leave these as ANY.
+        offered = element.get_static_pad("src").peer_query_caps(None)
+        self.assertFalse(offered.is_any())
+        self.assertFalse(offered.is_empty())
+        self.assertTrue(offered.is_subset(Gst.Caps.from_string("video/x-raw")))
 
     def test_v4l2_camera_opens_advertised_device_directly(self):
         if not Gst.ElementFactory.find("v4l2src"):

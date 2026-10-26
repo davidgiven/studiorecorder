@@ -57,9 +57,9 @@ python3 -m studio_recorder --test-sources --headless --duration 3
 python3 -m unittest discover -s tests -v
 ```
 
-The suite currently contains 31 tests. Media integration tests require `ffprobe` and `ffmpeg`; without them, those checks are skipped. They inspect and decode the camera/screen video and float32 audio tracks, check embedded identification tags, verify stopped startup without files and separate files across takes, exercise paused-only audio selection and busy-preview scheduling, and confirm post-encoding FPS measurement without preview. Other tests cover device routing, primary-monitor selection, mocked portal behavior, rolling-average boundaries, and camera frame-rate locking/fallbacks.
+The suite currently contains 32 tests. Media integration tests require `ffprobe` and `ffmpeg`; without them, those checks are skipped. They inspect and decode the camera/screen video and float32 audio tracks, check embedded identification tags, verify stopped startup without files and separate files across takes, exercise paused-only audio selection and busy-preview scheduling, and confirm post-encoding FPS measurement without preview. Other tests cover device routing, video-only PipeWire negotiation, primary-monitor selection, mocked portal behavior, rolling-average boundaries, and camera frame-rate locking/fallbacks.
 
-Real X11 smoke tests have exercised a C920 webcam, primary-monitor capture, webcam audio, stereo computer audio, NVIDIA H.264, Play/Stop cycles, and audio switching. With camera frame-rate locking enabled, the final four seconds of a test file measured 30.0 FPS after exposure settled. Real Wayland capture, additional hardware encoder backends, and long-duration/multi-camera operation still need validation.
+Real X11 smoke tests have exercised a C920 webcam, primary-monitor capture, webcam audio, stereo computer audio, NVIDIA H.264, Play/Stop cycles, and audio switching. With camera frame-rate locking enabled, the final four seconds of a test file measured 30.0 FPS after exposure settled. A Wayland startup smoke test with an HP Wide Vision HD camera verified live-preview readiness and clean exit. Wayland recording transitions, additional hardware encoder backends, and long-duration/multi-camera operation still need validation.
 
 ## Current scope
 
