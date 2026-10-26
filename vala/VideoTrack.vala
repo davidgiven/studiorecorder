@@ -1,5 +1,6 @@
 namespace Studio
 {
+    /** Tracks one camera's preview paintable, negotiated video format, and native post-encoding frame statistics. */
     public class VideoTrack : GLib.Object
     {
         public Camera camera;

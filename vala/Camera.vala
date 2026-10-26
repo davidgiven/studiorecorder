@@ -1,5 +1,6 @@
 namespace Studio
 {
+    /** Pairs a video source with the mutable audio assignment used by its meter and subsequent recordings. */
     public class Camera : GLib.Object
     {
         public Input input

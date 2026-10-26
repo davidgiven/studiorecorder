@@ -1,5 +1,6 @@
 namespace Studio
 {
+    /** Owns one preview or recording pipeline, including native media branches, mux pads, and safe take publication. */
     public class Recorder : GLib.Object
     {
         public Gst.Pipeline pipeline

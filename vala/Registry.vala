@@ -1,5 +1,6 @@
 namespace Studio
 {
+    /** Owns PipeWire device discovery and matches camera microphones conservatively by physical USB identity. */
     public class Registry : GLib.Object
     {
         private Gst.DeviceProvider? provider;
@@ -35,7 +36,7 @@ namespace Studio
         /** Resolve sysfs links and find the USB device shared by its video and audio interfaces. */
         private static string? usb_parent(string path)
         {
-            string? current = Native.realpath(path);
+            string? current = Posix.realpath(path);
             while (current != null && current != "/")
             {
                 if (FileUtils.test(Path.build_filename(current, "idVendor"), FileTest.EXISTS) &&

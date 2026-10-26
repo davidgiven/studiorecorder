@@ -1,5 +1,6 @@
 namespace Studio
 {
+    /** Describes a monitor rectangle in X11 desktop coordinates for primary-monitor screen capture. */
     public class Geometry : GLib.Object
     {
         public uint x;
@@ -55,6 +56,7 @@ namespace Studio
         return audio;
     }
 
+    /** Prepares required desktop inputs and owns the Wayland portal session and remote descriptor until shutdown. */
     public class DesktopCapture : GLib.Object
     {
         private const string BUS = "org.freedesktop.portal.Desktop";

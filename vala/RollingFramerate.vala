@@ -1,5 +1,6 @@
 namespace Studio
 {
+    /** Stores one monotonic observation of a cumulative encoded-frame counter for rolling FPS calculations. */
     private class FrameSample : GLib.Object
     {
         public uint64 time;
@@ -13,6 +14,7 @@ namespace Studio
         }
     }
 
+    /** Maintains a ten-second frame-count history with boundary interpolation and reset handling. */
     public class RollingFramerate : GLib.Object
     {
         private Queue<FrameSample> samples = new Queue<FrameSample> ();

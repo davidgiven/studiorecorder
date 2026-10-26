@@ -1,5 +1,6 @@
 namespace Studio
 {
+    /** Describes a capture source and the backend-specific routing needed to reopen it across pipeline rebuilds. */
     public class Input : GLib.Object
     {
         public string name
@@ -96,7 +97,7 @@ namespace Studio
             {
                 source = make("v4l2src");
                 source.set("device", video_path);
-                Native.lock_framerate(source);
+                lock_framerate(source);
             }
             else if (audio_name != null)
             {

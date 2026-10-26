@@ -6,6 +6,72 @@ private void assert_near(double actual, double expected)
     assert(Math.fabs(actual - expected) < 0.001);
 }
 
+/** Build the legacy boxed channel readings emitted by GStreamer's native level element. */
+private Gst.Structure rms_message(double[] readings)
+{
+    var channels = new GLib.ValueArray(0);
+    foreach (double reading in readings)
+    {
+        Value sample = Value(typeof(double));
+        sample.set_double(reading);
+        channels.append(sample);
+    }
+
+    // The structure owns a boxed copy after this helper's local array is released.
+    Value value = Value(typeof(GLib.ValueArray));
+    value.set_boxed(channels);
+    var message = new Gst.Structure.empty("level");
+    message.set_value("rms", value);
+    return message;
+}
+
+/** Check channel selection, meter limits, invalid readings, and missing RMS metadata. */
+private void test_level_rms()
+{
+    assert_near(level_rms(rms_message({ -30.0, -12.0 })), 0.8);
+    assert_near(level_rms(rms_message({ -90.0 })), 0.0);
+    assert_near(level_rms(rms_message({ 6.0 })), 1.0);
+    assert_near(level_rms(rms_message({})), 0.0);
+
+    // Non-finite channels must not hide a finite reading or light the meter on their own.
+    assert_near(level_rms(rms_message({ double.NAN, double.INFINITY, -double.INFINITY, -30.0 })), 0.5);
+    assert_near(level_rms(rms_message({ double.NAN, double.INFINITY, -double.INFINITY })), 0.0);
+
+    var missing = new Gst.Structure.empty("level");
+    assert_near(level_rms(missing), 0.0);
+    missing.set_value("rms", "unexpected value type");
+    assert_near(level_rms(missing), 0.0);
+
+    Value empty = Value(typeof(GLib.ValueArray));
+    empty.set_boxed(null);
+    missing.set_value("rms", empty);
+    assert_near(level_rms(missing), 0.0);
+}
+
+/** Exercise the real v4l2src signal callback without opening a physical capture device. */
+private void test_camera_framerate_callback()
+{
+    try
+    {
+        var input = new Input("Unavailable test camera", "test-v4l2-callback");
+        input.video_path = "/dev/studio-recorder-nonexistent-camera";
+        var source = input.create_element();
+        var caps = Gst.Caps.from_string("video/x-raw");
+
+        // An invalid descriptor must take the warning path and return normally.
+        Test.expect_message(
+            /* log_domain= */ null,
+            /* log_level= */ LogLevelFlags.LEVEL_WARNING,
+            /* pattern= */ "*exposure-driven frame-rate control unavailable*");
+        ((V4L2.Source) source).prepare_format(-1, caps);
+        Test.assert_expected_messages();
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
 /** Cover rolling-window interpolation, stalled output, duplicate timestamps, and counter or clock resets. */
 private void test_rates()
 {
@@ -249,6 +315,8 @@ int main(string[] args)
 {
     Test.init(ref args);
     Gst.init(ref args);
+    Test.add_func("/studio/camera-framerate-callback", test_camera_framerate_callback);
+    Test.add_func("/studio/level-rms", test_level_rms);
     Test.add_func("/studio/rolling-framerate", test_rates);
     Test.add_func("/studio/primary-monitor", test_geometry);
     Test.add_func("/studio/encoded-framerate", test_encoded_rate);

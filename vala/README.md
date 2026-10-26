@@ -29,7 +29,7 @@ The window starts paused, with live previews and audio meters. Play opens a new 
 
 ## Structure
 
-- `Application.vala`: GTK interface, transport state, audio changes, discovery worker, and shutdown. The small `Thumbnail` widget holder and `TransportState` enum stay alongside their owner.
+- `Application.vala`: GTK interface, transport state, audio changes, discovery worker, and shutdown. The small `Thumbnail` widget holder, `TransportState` enum, and Vala RMS-to-meter helper stay alongside their owner.
 - `Input.vala`: capture-input metadata and source construction.
 - `Camera.vala`: video input and its selected audio association.
 - `Registry.vala`: PipeWire discovery and physical USB association.
@@ -37,10 +37,11 @@ The window starts paused, with live previews and audio meters. Play opens a new 
 - `Recorder.vala`: capture/preview/recording graphs, encoder selection, track tags, audio deduplication, and exclusive output publication.
 - `VideoTrack.vala`: per-track preview, negotiated video format, and encoded-frame statistics.
 - `RollingFramerate.vala`: ten-second FPS history, with its private `FrameSample` helper.
+- `camera-controls.vala` / `v4l2.vapi`: Vala format-preparation callback and frame-rate locking through typed Linux ioctl declarations; camera exposure mode is preserved.
 - `capture-utils.vala`: shared element creation and capture error domain.
 - `test-sources.vala`: explicit synthetic development inputs.
 - `main.vala`: command-line validation and initialization.
-- `native.c` / `native.vapi`: a small C boundary for V4L2's format-preparation signal/ioctl, XInitThreads, realpath, and the legacy GValueArray returned by the level element. No frame or sample processing occurs here or in Vala.
+- `native.vapi`: a direct Xlib binding for XInitThreads. Filesystem link resolution uses the existing `Posix.realpath` binding. No handwritten C helpers remain; media processing stays in native GStreamer elements.
 
 Vala properties, signals, async methods, delegates, automatic reference ownership, and GLib collections replace Python's dynamic application machinery. GStreamer plugin-specific properties remain accessed through GObject properties; encoder enum strings use GStreamer's property parser. No parallel ObjFW/JVM object runtime is involved.
 
@@ -52,8 +53,8 @@ The current pipeline-rebuild architecture is preserved: Play, Stop, and audio ch
 make test-vala
 ```
 
-Requires `ffprobe`, `ffmpeg`, `dbus-run-session`, Python/PyGObject for the isolated mock portal, and the synthetic GStreamer plugins including `x264enc`. The Vala GLib tests exercise rolling-window interpolation/reset/stalls, monitor geometry, encoded FPS without preview, audio selection under busy main-loop work, duplicate transport actions, multiple takes, and mandatory computer audio with screen audio disabled. The black-box Python test driver executes the compiled binary, checks initial paused behavior and invalid arguments, verifies SIGINT/SIGTERM finalization, inspects all five tracks and their tags, and decodes every track. Five further scenarios run the compiled portal client against a mock service on a private D-Bus: serial-based targeting and descriptor lifetime, node-ID fallback, denial, multiple-stream rejection, and cancellation. The mock deliberately sends its Response before the method reply. Python is used only as a test driver.
+Requires `ffprobe`, `ffmpeg`, `dbus-run-session`, Python/PyGObject for the isolated mock portal, and the synthetic GStreamer plugins including `x264enc`. The Vala GLib tests exercise the actual v4l2src format signal with an invalid descriptor, channel RMS-to-meter conversion (including missing and non-finite readings), rolling-window interpolation/reset/stalls, monitor geometry, encoded FPS without preview, audio selection under busy main-loop work, duplicate transport actions, multiple takes, and mandatory computer audio with screen audio disabled. The black-box Python test driver executes the compiled binary, checks initial paused behavior and invalid arguments, verifies SIGINT/SIGTERM finalization, inspects all five tracks and their tags, and decodes every track. Five further scenarios run the compiled portal client against a mock service on a private D-Bus: serial-based targeting and descriptor lifetime, node-ID fallback, denial, multiple-stream rejection, and cancellation. The mock deliberately sends its Response before the method reply. Python is used only as a test driver.
 
-Validated locally: all 13 Vala/black-box/portal scenarios and the original 32 Python tests passed; a synthetic GTK preview/record/finalize smoke test also passed.
+Validated locally: all 15 Vala/black-box/portal scenarios and the original 32 Python tests passed; a synthetic GTK preview/record/finalize smoke test also passed.
 
 Real cameras, portal behavior on actual Wayland desktops, hardware encoder allocation, and long-duration synchronization require separate hardware validation of this port. Existing Python hardware smoke-test results do not validate the Vala implementation. Native libraries and plugins are still required at runtime. Vala 0.56 generates C qualifier warnings against newer GLib/GTK headers; the audio-meter helper also accesses a deprecated type because that is what the level plugin publishes.

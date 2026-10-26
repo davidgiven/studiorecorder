@@ -5,6 +5,32 @@ namespace Studio
         PREPARING, PAUSED, STARTING, RECORDING, FINALIZING, CLOSED
     }
 
+    /** Map native channel RMS readings onto a normalized meter without changing the audio stream. */
+    internal double level_rms(Gst.Structure structure)
+    {
+        unowned Value? value = structure.get_value("rms");
+        double loudest = -60.0;
+
+        // level publishes a legacy boxed ValueArray; borrow it while the message remains alive.
+        if (value != null && value.holds(typeof(GLib.ValueArray)))
+        {
+            unowned GLib.ValueArray? channels = (GLib.ValueArray?) value.get_boxed();
+            if (channels != null)
+            {
+                for (uint i = 0; i < channels.n_values; i++)
+                {
+                    double db = channels.get_nth(i).get_double();
+                    if (!db.is_nan() && db.is_infinity() == 0 && db > loudest)
+                        loudest = db;
+                }
+            }
+        }
+
+        // Ignore non-finite readings and display the loudest channel in the -60 to 0 dBFS range.
+        return ((loudest + 60.0) / 60.0).clamp(0.0, 1.0);
+    }
+
+    /** Holds a preview track and its thumbnail widgets for meter, format, and audio-choice updates. */
     private class Thumbnail : GLib.Object
     {
         public VideoTrack track;
@@ -22,6 +48,7 @@ namespace Studio
         }
     }
 
+    /** Coordinates the GTK interface, capture discovery, transport transitions, and graceful take finalization on the main loop. */
     public class Application : GLib.Object
     {
         private MainLoop loop = new MainLoop();
@@ -654,7 +681,7 @@ namespace Studio
                     if (structure != null && structure.get_name() == "level" && window != null)
                     {
                         string? identity = recorder.level_sources.lookup(message.src.name);
-                        double level = Native.level_rms(structure);
+                        double level = level_rms(structure);
                         foreach (var item in items)
                             if (item.meter != null && item.track.camera.audio != null && item.track.camera.audio.identity == identity)
                                 item.meter.value = level;
