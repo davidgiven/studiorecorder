@@ -8,6 +8,8 @@ Launch the application from the directory where recordings should be saved:
 python3 -m studio_recorder
 ```
 
+From the repository root, `make run` launches the application and `make test` runs the test suite. Both use `python3` by default; override it with `make PYTHON=/path/to/python3 test` if needed.
+
 It discovers cameras through PipeWire, matches microphones using physical USB identity, and previews every discovered camera and its associated audio, plus primary-monitor capture and computer audio. It starts stopped and creates no output until Play is pressed. A screen-only session works even without a webcam. Physical V4L2 webcams are opened directly through `v4l2src` using their advertised device path; other camera types use their provider's capture element. Named audio inputs use `pulsesrc` through the PulseAudio-compatible service, with provider capture as a fallback when a node name is unavailable. It writes one timestamped `StudioRecorder_*.mkv` in the current directory, containing independent H.264 video tracks and deduplicated, uncompressed float32 PCM audio tracks. Track names/comments identify sources and audio associations.
 
 ## Preview and recording controls
