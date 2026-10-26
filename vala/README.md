@@ -29,10 +29,16 @@ The window starts paused, with live previews and audio meters. Play opens a new 
 
 ## Structure
 
-- `devices.vala`: input models, PipeWire discovery, physical USB association, source factories, and explicit synthetic sources.
-- `desktop.vala`: primary-monitor geometry, asynchronous X11 query, asynchronous portal requests, descriptor ownership, and portal cleanup.
-- `media.vala`: capture/preview/recording graphs, hardware encoder selection, tags, audio deduplication, encoded-frame statistics, and exclusive output publication.
-- `app.vala`: GTK interface, typed transport state, paused audio changes, discovery worker, bus handling, timeouts, and graceful shutdown.
+- `Application.vala`: GTK interface, transport state, audio changes, discovery worker, and shutdown. The small `Thumbnail` widget holder and `TransportState` enum stay alongside their owner.
+- `Input.vala`: capture-input metadata and source construction.
+- `Camera.vala`: video input and its selected audio association.
+- `Registry.vala`: PipeWire discovery and physical USB association.
+- `DesktopCapture.vala`: asynchronous X11/Wayland screen capture and portal lifetime. Its small `Geometry` helper and desktop-input functions stay in the same file.
+- `Recorder.vala`: capture/preview/recording graphs, encoder selection, track tags, audio deduplication, and exclusive output publication.
+- `VideoTrack.vala`: per-track preview, negotiated video format, and encoded-frame statistics.
+- `RollingFramerate.vala`: ten-second FPS history, with its private `FrameSample` helper.
+- `capture-utils.vala`: shared element creation and capture error domain.
+- `test-sources.vala`: explicit synthetic development inputs.
 - `main.vala`: command-line validation and initialization.
 - `native.c` / `native.vapi`: a small C boundary for V4L2's format-preparation signal/ioctl, XInitThreads, realpath, and the legacy GValueArray returned by the level element. No frame or sample processing occurs here or in Vala.
 

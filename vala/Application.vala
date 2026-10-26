@@ -603,11 +603,13 @@ namespace Studio
                     else
                         fail("Live capture ended unexpectedly.");
                     break;
+
                 case Gst.MessageType.APPLICATION:
                     unowned var detail = message.get_structure();
                     if (detail != null && detail.get_name() == "studio-recorder-error")
                         fail(detail.get_string("message") ?? "Cannot link decoded video.");
                     break;
+
                 case Gst.MessageType.STATE_CHANGED:
                     if (message.src != recorder.pipeline || state == TransportState.FINALIZING)
                         break;

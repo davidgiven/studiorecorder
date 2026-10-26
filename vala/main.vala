@@ -8,16 +8,34 @@ int main(string[] args)
     OptionEntry[] options =
     {
         {
-            "test-sources", 0, 0, OptionArg.NONE, ref synthetic, "Use synthetic sources and software encoding", null
+            /* long_name= */ "test-sources",
+            /* short_name= */ 0,
+            /* flags= */ 0,
+            /* arg= */ OptionArg.NONE,
+            /* arg_data= */ ref synthetic,
+            /* description= */ "Use synthetic sources and software encoding",
+            /* arg_description= */ null
         },
         {
-            "headless", 0, 0, OptionArg.NONE, ref headless, "Omit the window (requires --test-sources)", null
+            /* long_name= */ "headless",
+            /* short_name= */ 0,
+            /* flags= */ 0,
+            /* arg= */ OptionArg.NONE,
+            /* arg_data= */ ref headless,
+            /* description= */ "Omit the window (requires --test-sources)",
+            /* arg_description= */ null
         },
         {
-            "duration", 0, 0, OptionArg.DOUBLE, ref duration, "Record one take for SECONDS (requires --test-sources)", "SECONDS"
+            /* long_name= */ "duration",
+            /* short_name= */ 0,
+            /* flags= */ 0,
+            /* arg= */ OptionArg.DOUBLE,
+            /* arg_data= */ ref duration,
+            /* description= */ "Record one take for SECONDS (requires --test-sources)",
+            /* arg_description= */ "SECONDS"
         },
         {
-            null
+            /* long_name= */ null
         }
     };
     try

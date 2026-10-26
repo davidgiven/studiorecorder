@@ -11,7 +11,9 @@ test:
 VALAC ?= valac
 UNCRUSTIFY ?= uncrustify
 VALA_PACKAGES = --pkg gtk4 --pkg gstreamer-1.0 --pkg gio-unix-2.0 --pkg posix
-VALA_CORE = vala/devices.vala vala/desktop.vala vala/media.vala vala/app.vala
+VALA_CAPTURE = vala/capture-utils.vala vala/Input.vala vala/Camera.vala vala/DesktopCapture.vala
+VALA_CORE = $(VALA_CAPTURE) vala/Registry.vala vala/test-sources.vala \
+	vala/RollingFramerate.vala vala/VideoTrack.vala vala/Recorder.vala vala/Application.vala
 VALA_NATIVE = vala/native.vapi vala/native.c
 VALA_FLAGS = -g $(VALA_PACKAGES) -X -Ivala -X -lX11 -X -lm
 
@@ -37,6 +39,6 @@ test-vala: vala build/test-vala build/test-vala-portal
 	$(PYTHON) vala/check_recording.py
 	$(PYTHON) vala/check_portal.py
 
-build/test-vala-portal: vala/devices.vala vala/desktop.vala $(VALA_NATIVE) vala/native.h vala/portal-test.vala
+build/test-vala-portal: $(VALA_CAPTURE) $(VALA_NATIVE) vala/native.h vala/portal-test.vala
 	mkdir -p build/portal
-	$(VALAC) $(VALA_FLAGS) --directory build/portal -o $(abspath $@) vala/devices.vala vala/desktop.vala $(VALA_NATIVE) vala/portal-test.vala
+	$(VALAC) $(VALA_FLAGS) --directory build/portal -o $(abspath $@) $(VALA_CAPTURE) $(VALA_NATIVE) vala/portal-test.vala
