@@ -1,5 +1,3 @@
-using Studio;
-
 /** Assert approximate equality for floating-point framerate calculations. */
 private void assert_near(double actual, double expected)
 {
@@ -207,7 +205,7 @@ private void test_transport()
     {
         string directory = DirUtils.make_tmp("studio-vala-transport-XXXXXX");
         Environment.set_current_dir(directory);
-        var app = new Studio.Application(true, true);
+        var app = new Application(true, true);
         int phase = 0;
         int recordings = 0;
         uint64 start = 0;

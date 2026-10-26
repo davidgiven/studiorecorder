@@ -60,9 +60,9 @@ int main(string[] args)
         // Initialize Xlib threading before GTK or GStreamer can create capture threads.
         if (Environment.get_variable("DISPLAY") != null && Environment.get_variable("WAYLAND_DISPLAY") == null)
             if (Native.xinit_threads() == 0)
-                throw new Studio.RecorderError.FAILED("Cannot initialize X11 threading.");
+                throw new RecorderError.FAILED("Cannot initialize X11 threading.");
         Gst.init(ref args);
-        var app = new Studio.Application(synthetic, headless, duration);
+        var app = new Application(synthetic, headless, duration);
         return app.run();
     }
     catch (Error error)

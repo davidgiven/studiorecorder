@@ -5,7 +5,7 @@ int main(string[] args)
 {
     var loop = new MainLoop();
     string scenario = args[1];
-    var capture = new Studio.DesktopCapture();
+    var capture = new DesktopCapture();
     int code = 1;
     uint watchdog = Timeout.add_seconds(
         /* interval= */ 8,
