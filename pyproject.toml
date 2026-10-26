@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "studio-recorder"
+version = "0.1.0"
+description = "Automatic multitrack desktop recording with GStreamer"
+requires-python = ">=3.11"
+dependencies = ["PyGObject>=3.46"]
+
+[project.scripts]
+studio-recorder = "studio_recorder.app:main"
+
+[tool.setuptools.packages.find]
+include = ["studio_recorder*"]
