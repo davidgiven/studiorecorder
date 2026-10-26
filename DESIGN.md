@@ -16,7 +16,7 @@ Audio meters overlay thumbnail images. The main preview's top-left overlay shows
 
 `src/` contains the Vala application and its native API declarations. `tests/` contains Vala test entry points and Python test drivers. Python is required only for the test drivers; the retired Python application and its packaging have been removed. Each major application class has a matching source filename, and small helpers remain beside their users. Application types have no custom namespace; external API declarations use `Native` and `V4L2`.
 
-The default `make` target builds `./studio-recorder`; `make run` launches it with optional `ARGS`. Compiler working directories are `.obj/app`, `.obj/unit`, and `.obj/portal`. Test executables are `.obj/test-unit` and `.obj/test-portal`. `make test` builds and runs all test groups. `make format` formats `src/*.vala` and `tests/*.vala` with the checked-in Uncrustify configuration. `make clean` removes `.obj/` and the root executable, leaving recordings intact.
+The default `make` target builds `./studio-recorder`; `make run` launches it with optional `ARGS`. Compiler working directories are `.obj/app`, `.obj/unit`, and `.obj/portal`. Test executables are `.obj/test-unit` and `.obj/test-portal`. `make test` builds and runs all test groups. `make format` formats `src/*.vala` and `tests/*.vala` with the checked-in Uncrustify configuration, then reformats `README.md` with Pandoc (GitHub-flavored Markdown, prose wrapped at 80 columns). `make clean` removes `.obj/` and the root executable, leaving recordings intact.
 
 ## Components and ownership
 

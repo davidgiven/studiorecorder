@@ -4,6 +4,7 @@ PYTHON ?= python3
 
 VALAC ?= valac
 UNCRUSTIFY ?= uncrustify
+PANDOC ?= pandoc
 VALA_PACKAGES = --pkg gtk4 --pkg gstreamer-1.0 --pkg gio-unix-2.0 --pkg posix
 VALA_CAPTURE = src/camera-controls.vala src/capture-utils.vala src/Input.vala src/Camera.vala src/DesktopCapture.vala
 VALA_CORE = $(VALA_CAPTURE) src/Registry.vala src/test-sources.vala \
@@ -19,6 +20,7 @@ clean:
 
 format:
 	$(UNCRUSTIFY) -c uncrustify.cfg -l VALA --replace --no-backup $(wildcard src/*.vala tests/*.vala)
+	$(PANDOC) --from=gfm --to=gfm --wrap=auto --columns=80 README.md --output=README.md
 
 studio-recorder: $(VALA_CORE) $(VALA_NATIVE) src/main.vala
 	mkdir -p .obj/app

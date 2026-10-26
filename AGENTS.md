@@ -25,7 +25,7 @@ Vala test programs and Python test drivers live in `tests/`. Python is a test de
 - `make` builds `./studio-recorder` in the repository root.
 - `make run` launches the application; pass options through `ARGS`, for example `make run ARGS=--test-sources`.
 - `make test` builds and runs the Vala checks, executable recording tests, and private-D-Bus portal tests. These need ffprobe, ffmpeg, Python/PyGObject, dbus-run-session, and synthetic GStreamer plugins.
-- `make format` runs Uncrustify on Vala sources in both `src/` and `tests/` using `uncrustify.cfg`.
+- `make format` runs Uncrustify on Vala sources in both `src/` and `tests/` using `uncrustify.cfg`, then formats `README.md` as GitHub-flavored Markdown with Pandoc at 80 columns.
 - `make clean` removes `.obj/` and `studio-recorder`. Build intermediates and test executables belong in `.obj/`; recordings must not be cleaned.
 
 Use synthetic sources for automated recording checks. Do not treat synthetic or mocked portal results as hardware validation; document real-camera, screen-capture, and encoder validation separately.
