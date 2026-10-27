@@ -12,6 +12,14 @@ public class Camera : GLib.Object
         set;
     }
 
+    /** Include this channel's video and selected audio in subsequent takes; previews stay live. */
+    public bool record_enabled
+    {
+        get;
+        set;
+        default = true;
+    }
+
     /** Associate a video input with the audio selection used for metering and future takes. */
     public Camera (Input input, Input? audio = null)
     {

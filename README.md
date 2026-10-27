@@ -64,5 +64,5 @@ BSD license. Look at the LICENSE file for the full text.
 # Who?
 
 This program was written by myself, David Given <dg@cowlark.com>; I have a
-website at http://cowlark.com. There may or may not be anything interesting
+website at <http://cowlark.com>. There may or may not be anything interesting
 there.

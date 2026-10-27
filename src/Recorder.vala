@@ -124,13 +124,27 @@ public class Recorder : GLib.Object
             throw new RecorderError.FAILED("Cannot attach %s track", kind);
     }
 
-    /** Build every video branch and deduplicate selected audio while retaining required computer audio. */
+    /** Keep all previews live while recording enabled video channels and their deduplicated audio. */
     public void build(List<Camera> cameras, List<Input> required_audio) throws Error
     {
         if (cameras.length() == 0)
             throw new RecorderError.FAILED("No video inputs.");
         if (preview && Gst.ElementFactory.find("gtk4paintablesink") == null)
             throw new RecorderError.FAILED("Missing gtk4paintablesink (install gst-plugin-gtk4).");
+
+        // Screen inclusion also controls its independent computer-audio track.
+        bool screen_enabled = false;
+        bool any_channel_enabled = false;
+        foreach (var camera in cameras)
+        {
+            if (!camera.record_enabled)
+                continue;
+            any_channel_enabled = true;
+            if (camera.input.identity.has_prefix("desktop-screen"))
+                screen_enabled = true;
+        }
+        if (recording && !any_channel_enabled)
+            throw new RecorderError.FAILED("Enable at least one channel before recording.");
 
         // Only a take allocates a writer and encoders; paused preview creates no output.
         if (recording)
@@ -151,26 +165,35 @@ public class Recorder : GLib.Object
             chain({ mux, sink });
         }
 
-        // Deduplicate microphones by identity while always seeding required computer audio.
+        // Keep all meters live, but record independent computer audio only when Screen is enabled.
         var audio = new HashTable<string, Input> (str_hash, str_equal);
+        var recorded_audio = new HashTable<string, bool> (str_hash, str_equal);
         foreach (var input in required_audio)
+        {
             audio.insert(input.identity, input);
+            if (input.identity != "desktop-audio" || screen_enabled)
+                recorded_audio.insert(input.identity, true);
+        }
         foreach (var camera in cameras)
         {
             add_video(camera);
             if (camera.audio != null)
+            {
                 audio.insert(camera.audio.identity, camera.audio);
+                if (camera.record_enabled)
+                    recorded_audio.insert(camera.audio.identity, true);
+            }
         }
 
-        // Record each audio source once and name every associated camera in its metadata.
+        // Disabled channels keep live meters but only enabled associations appear in recording metadata.
         foreach (var input in audio.get_values())
         {
             string[] associated =
             {};
             foreach (var camera in cameras)
-                if (camera.audio != null && camera.audio.identity == input.identity)
+                if ((!recording || camera.record_enabled) && camera.audio != null && camera.audio.identity == input.identity)
                     associated += camera.input.name;
-            add_audio(input, string.joinv(", ", associated));
+            add_audio(input, string.joinv(", ", associated), recording && recorded_audio.contains(input.identity));
         }
     }
 
@@ -211,7 +234,7 @@ public class Recorder : GLib.Object
                     }
                 }
             });
-        if (recording)
+        if (recording && camera.record_enabled)
         {
             var input_queue = queue();
             var encode = make(encoder);
@@ -255,7 +278,7 @@ public class Recorder : GLib.Object
             sink.get("paintable", out paintable);
             track.paintable = paintable;
         }
-        else if (!recording)
+        else if (!recording || !camera.record_enabled)
         {
             var preview_queue = queue(true);
             var sink = make("fakesink");
@@ -267,7 +290,7 @@ public class Recorder : GLib.Object
     }
 
     /** Convert one unique input to 48 kHz float32 PCM without restricting its channel count. */
-    private void add_audio(Input input, string associated) throws Error
+    private void add_audio(Input input, string associated, bool record_audio) throws Error
     {
         var source = input.create_element();
         labels.insert(source.name, "Audio input '%s' [%s]".printf(input.name, input.identity));
@@ -282,8 +305,8 @@ public class Recorder : GLib.Object
                               tags(input.name, "Audio source: %s; cameras: %s".printf(input.identity, associated)), output_queue });
         level_sources.insert(meter.name, input.identity);
 
-        // Paused audio ends in a sink after metering; a take routes it to its own mux pad.
-        if (recording)
+        // Disabled and paused audio end after metering; only selected recording inputs reach the muxer.
+        if (record_audio)
             mux_track(output_queue, "audio");
         else
         {

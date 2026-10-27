@@ -35,14 +35,16 @@ private class Thumbnail : GLib.Object
     public Gtk.Label details;
     public Gtk.LevelBar? meter;
     public Gtk.DropDown selector;
+    public Gtk.ToggleButton record_toggle;
 
     /** Group each preview track with the widgets updated by meters, statistics, and audio selection. */
-    public Thumbnail (VideoTrack track, Gtk.Label details, Gtk.LevelBar? meter, Gtk.DropDown selector)
+    public Thumbnail (VideoTrack track, Gtk.Label details, Gtk.LevelBar? meter, Gtk.DropDown selector, Gtk.ToggleButton record_toggle)
     {
         this.track = track;
         this.details = details;
         this.meter = meter;
         this.selector = selector;
+        this.record_toggle = record_toggle;
     }
 }
 
@@ -406,8 +408,35 @@ public class Application : GLib.Object
     /** Start a new take only when preview is ready and no shutdown is pending. */
     public void play()
     {
-        if (state == TransportState.PAUSED && !exiting)
+        if (state == TransportState.PAUSED && !exiting && has_recording_channels())
             prepare_pipeline(true);
+    }
+
+    /** Report whether a take would contain at least one enabled video channel. */
+    private bool has_recording_channels()
+    {
+        foreach (var camera in cameras)
+            if (camera.record_enabled)
+                return true;
+        return false;
+    }
+
+    /** Change a channel's recording inclusion only while stopped, without interrupting its preview. */
+    public bool set_record_enabled(string video_identity, bool enabled)
+    {
+        if (state != TransportState.PAUSED || exiting)
+            return false;
+
+        foreach (var camera in cameras)
+        {
+            if (camera.input.identity != video_identity || camera.record_enabled == enabled)
+                continue;
+            camera.record_enabled = enabled;
+            update_transport();
+            status(has_recording_channels() ? "Paused — ready to record." : "Enable a channel to record.");
+            return true;
+        }
+        return false;
     }
 
     /** Apply a changed, valid audio assignment while paused and defer preview reconstruction. */
@@ -455,10 +484,14 @@ public class Application : GLib.Object
     {
         if (window == null)
             return;
-        play_button.sensitive = state == TransportState.PAUSED && !exiting;
+        play_button.sensitive = state == TransportState.PAUSED && !exiting && has_recording_channels();
         stop_button.sensitive = (state == TransportState.RECORDING || state == TransportState.STARTING) && !exiting;
         foreach (var item in items)
+        {
             item.selector.sensitive = state == TransportState.PAUSED && !exiting;
+            item.record_toggle.sensitive = state == TransportState.PAUSED && !exiting;
+            item.record_toggle.active = item.track.camera.record_enabled;
+        }
         if (state == TransportState.RECORDING)
         {
             uint64 elapsed = (Gst.Util.get_timestamp() - recording_started) / Gst.SECOND;
@@ -474,6 +507,26 @@ public class Application : GLib.Object
             transport_label.label = "Starting…";
         else
             transport_label.set_markup("<span foreground='#ff2020' size='xx-large' weight='bold'>PAUSED</span>");
+    }
+
+    /** Draw a high-contrast red exclusion mark scaled to the thumbnail's allocation. */
+    private static void draw_channel_exclusion(Gtk.DrawingArea area, Cairo.Context cr, int width, int height)
+    {
+        double stroke = double.max(6.0, double.min(width, height) * 0.08);
+        double margin = stroke * 1.5;
+        cr.set_line_cap(Cairo.LineCap.ROUND);
+        cr.move_to(margin, margin);
+        cr.line_to(width - margin, height - margin);
+        cr.move_to(width - margin, margin);
+        cr.line_to(margin, height - margin);
+
+        // A dark outline keeps the red diagonals visible over bright camera or desktop content.
+        cr.set_source_rgba(0.0, 0.0, 0.0, 0.8);
+        cr.set_line_width(stroke + 4.0);
+        cr.stroke_preserve();
+        cr.set_source_rgb(1.0, 0.125, 0.125);
+        cr.set_line_width(stroke);
+        cr.stroke();
     }
 
     /** Rebuild thumbnails and audio selectors while preserving the selected main preview. */
@@ -515,6 +568,20 @@ public class Application : GLib.Object
                 };
                 overlay.add_overlay(meter);
             }
+            // Bind exclusion visibility to the model so toggles and pipeline rebuilds stay in sync.
+            var exclusion = new Gtk.DrawingArea()
+            {
+                can_target = false,
+                hexpand = true,
+                vexpand = true
+            };
+            exclusion.set_draw_func(draw_channel_exclusion);
+            track.camera.bind_property(
+                /* source_property= */ "record-enabled",
+                /* target= */ exclusion,
+                /* target_property= */ "visible",
+                /* flags= */ BindingFlags.SYNC_CREATE | BindingFlags.INVERT_BOOLEAN);
+            overlay.add_overlay(exclusion);
             column.append(overlay);
             column.append(new Gtk.Label(track.camera.input.name));
             var button = new Gtk.Button()
@@ -554,8 +621,31 @@ public class Application : GLib.Object
                     select_audio(track.camera.input.identity, input != null ? input.identity : null);
                 });
             item.append(selector);
+
+            // Recording inclusion is independent of preview selection and paused audio assignment.
+            var record_toggle = new Gtk.ToggleButton.with_label("Record channel")
+            {
+                active = track.camera.record_enabled,
+                sensitive = state == TransportState.PAUSED && !exiting,
+                tooltip_text = track.camera.input.identity.has_prefix("desktop-screen")
+                    ? "Record Screen, its selected audio, and independent computer audio"
+                    : "Record this channel's video and selected audio in subsequent takes"
+            };
+            record_toggle.toggled.connect(
+                /* handler= */ () =>
+                {
+                    if (!set_record_enabled(track.camera.input.identity, record_toggle.active))
+                        record_toggle.active = track.camera.record_enabled;
+                });
+            item.append(record_toggle);
             thumbnails.append(item);
-            items.append(new Thumbnail(track, details, meter, selector));
+            items.append(
+                /* data= */ new Thumbnail(
+                    /* track= */ track,
+                    /* details= */ details,
+                    /* meter= */ meter,
+                    /* selector= */ selector,
+                    /* record_toggle= */ record_toggle));
             if (first || track.camera.input.identity == selected_identity)
             {
                 select_preview(track);
@@ -661,7 +751,7 @@ public class Application : GLib.Object
                     else
                     {
                         set_state(TransportState.PAUSED);
-                        status("Paused — ready to record.");
+                        status(has_recording_channels() ? "Paused — ready to record." : "Enable a channel to record.");
                         if (duration > 0)
                             Idle.add(
                                 /* function= */ () =>

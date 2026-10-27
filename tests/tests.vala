@@ -308,6 +308,269 @@ private void test_transport()
     }
 }
 
+/** Record one short synthetic take and verify channel selection through actual saved tracks. */
+private void verify_channel_take(List<Camera> cameras, string[] included, string[] excluded)
+{
+    try
+    {
+        var required = new List<Input> ();
+        // Computer audio follows Screen even when its audio dropdown selects another input.
+        required.append(test_input("Computer audio", "desktop-audio", false, 2));
+        var recorder = new Recorder(true, false, true);
+        recorder.build(cameras, required);
+        var loop = new MainLoop();
+        var bus = recorder.pipeline.get_bus();
+        bus.add_signal_watch();
+        bool finalized = false;
+        ulong handler = bus.message.connect(
+            /* handler= */ (message) =>
+            {
+                if (message.type == Gst.MessageType.ERROR)
+                    GLib.error("%s", recorder.describe_error(message));
+                if (message.type == Gst.MessageType.EOS)
+                {
+                    finalized = true;
+                    loop.quit();
+                }
+            });
+        recorder.start();
+        Timeout.add(
+            /* interval= */ 400,
+            /* function= */ () =>
+            {
+                assert(recorder.stop());
+                return Source.REMOVE;
+            });
+        uint watchdog = Timeout.add_seconds(
+            /* interval= */ 12,
+            /* function= */ () =>
+            {
+                GLib.error("Channel recording timed out");
+            });
+        loop.run();
+        Source.remove(watchdog);
+        assert(finalized);
+        bus.disconnect(handler);
+        bus.remove_signal_watch();
+        recorder.close(true);
+
+        // Source IDs in stream comments identify both omitted tracks and shared-audio associations.
+        string output;
+        int result;
+        Process.spawn_sync(
+            /* working_directory= */ null,
+            /* argv= */ new string[] { "ffprobe", "-v", "error", "-show_entries", "stream=codec_type:stream_tags=title,comments", "-of", "compact", recorder.final_path },
+            /* envp= */ null,
+            /* _flags= */ SpawnFlags.SEARCH_PATH,
+            /* child_setup= */ null,
+            /* standard_output= */ out output,
+            /* standard_error= */ null,
+            /* wait_status= */ out result);
+        assert(result == 0);
+        assert(output.strip().split("\n").length == included.length);
+        output = output.replace("\\", "");
+        foreach (string identity in included)
+            assert(output.contains(identity));
+        foreach (string identity in excluded)
+            assert(!output.contains(identity));
+
+        // Disabled video branches still negotiate and disabled audio still supplies meters.
+        assert(recorder.videos.length() == 3);
+        foreach (var track in recorder.videos)
+            assert((track.counter != null) == track.camera.record_enabled);
+        FileUtils.unlink(recorder.final_path);
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
+/** Check shared microphones, disabled screen audio, re-enabling, and all-off recording rejection. */
+private void test_channel_recording()
+{
+    string original = Environment.get_current_dir();
+    try
+    {
+        string directory = DirUtils.make_tmp("studio-channel-recording-XXXXXX");
+        Environment.set_current_dir(directory);
+        var cameras = test_cameras();
+        foreach (var camera in cameras)
+            assert(camera.record_enabled);
+
+        // One enabled camera retains its shared microphone; Screen contributes neither video nor computer audio.
+        cameras.nth_data(0).record_enabled = false;
+        cameras.nth_data(2).record_enabled = false;
+        verify_channel_take(
+            /* cameras= */ cameras,
+            /* included= */ { "test-video-1", "test-audio" },
+            /* excluded= */ { "test-video-0", "desktop-screen", "desktop-audio", "Test camera 1" });
+
+        // If every microphone association is off, only Screen and its independent computer audio remain.
+        cameras.nth_data(1).record_enabled = false;
+        cameras.nth_data(2).record_enabled = true;
+        verify_channel_take(
+            /* cameras= */ cameras,
+            /* included= */ { "desktop-screen", "desktop-audio" },
+            /* excluded= */ { "test-video-0", "test-video-1", "test-audio" });
+
+        // Enabled Screen retains independent computer audio even when its dropdown selects the shared microphone.
+        var computer = cameras.nth_data(2).audio;
+        cameras.nth_data(2).audio = cameras.nth_data(1).audio;
+        verify_channel_take(
+            /* cameras= */ cameras,
+            /* included= */ { "desktop-screen", "desktop-audio", "test-audio" },
+            /* excluded= */ { "test-video-0", "test-video-1" });
+        cameras.nth_data(2).audio = computer;
+
+        // A shared computer-audio input is still recorded if another enabled channel explicitly selects it.
+        cameras.nth_data(0).audio = cameras.nth_data(2).audio;
+        cameras.nth_data(0).record_enabled = true;
+        cameras.nth_data(2).record_enabled = false;
+        verify_channel_take(
+            /* cameras= */ cameras,
+            /* included= */ { "test-video-0", "desktop-audio" },
+            /* excluded= */ { "test-video-1", "desktop-screen", "test-audio" });
+
+        foreach (var camera in cameras)
+            camera.record_enabled = true;
+        verify_channel_take(
+            /* cameras= */ cameras,
+            /* included= */ { "test-video-0", "test-video-1", "desktop-screen", "test-audio", "desktop-audio" },
+            /* excluded= */ {});
+
+        // All-off preview remains valid, but rejecting an empty take must not reserve an output file.
+        foreach (var camera in cameras)
+            camera.record_enabled = false;
+        var required = new List<Input> ();
+        required.append(cameras.nth_data(2).audio);
+        var preview = new Recorder(false, false, true);
+        preview.build(cameras, required);
+        assert(preview.videos.length() == 3);
+        preview.close();
+        var empty = new Recorder(true, false, true);
+        bool rejected = false;
+        try
+        {
+            empty.build(cameras, required);
+        }
+        catch (RecorderError error)
+        {
+            rejected = true;
+        }
+        assert(rejected);
+        assert(empty.partial_path == null);
+        empty.close();
+        assert(Dir.open(directory).read_name() == null);
+        Environment.set_current_dir(original);
+        DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        Environment.set_current_dir(original);
+        GLib.error("%s", error.message);
+    }
+}
+
+/** Verify inclusion controls are stopped-only and survive audio-driven preview reconstruction. */
+private void test_channel_transport()
+{
+    string original = Environment.get_current_dir();
+    try
+    {
+        string directory = DirUtils.make_tmp("studio-channel-transport-XXXXXX");
+        Environment.set_current_dir(directory);
+        var app = new Application(true, true);
+        int phase = 0;
+        uint64 started = 0;
+        assert(!app.set_record_enabled("test-video-0", false));
+        uint poll = Timeout.add(
+            /* interval= */ 50,
+            /* function= */ () =>
+            {
+                if (app.transport_state == TransportState.PAUSED)
+                {
+                    if (phase == 0)
+                    {
+                        assert(!app.set_record_enabled("unknown", false));
+                        assert(!app.set_record_enabled("test-video-0", true));
+                        assert(app.set_record_enabled("test-video-0", false));
+                        assert(app.set_record_enabled("test-video-1", false));
+                        assert(app.set_record_enabled("desktop-screen", false));
+                        app.play();
+                        assert(app.transport_state == TransportState.PAUSED);
+                        try
+                        {
+                            assert(Dir.open(directory).read_name() == null);
+                        }
+                        catch (Error error)
+                        {
+                            GLib.error("%s", error.message);
+                        }
+                        assert(app.select_audio("test-video-0", null));
+                        assert(!app.set_record_enabled("test-video-0", true));
+                        phase = 1;
+                    }
+                    else if (phase == 1)
+                    {
+                        assert(!app.set_record_enabled("test-video-0", false));
+                        assert(app.set_record_enabled("test-video-1", true));
+                        app.play();
+                        assert(!app.set_record_enabled("test-video-1", false));
+                        phase = 2;
+                    }
+                    else if (phase == 3)
+                    {
+                        assert(!app.set_record_enabled("test-video-0", false));
+                        assert(!app.set_record_enabled("desktop-screen", false));
+                        app.request_exit();
+                        return Source.REMOVE;
+                    }
+                }
+                else if (phase == 2 && app.transport_state == TransportState.RECORDING)
+                {
+                    assert(!app.set_record_enabled("test-video-1", false));
+                    if (started == 0)
+                        started = Gst.Util.get_timestamp();
+                    if (Gst.Util.get_timestamp() - started > 400 * Gst.MSECOND)
+                    {
+                        app.stop();
+                        assert(!app.set_record_enabled("test-video-1", false));
+                        phase = 3;
+                    }
+                }
+                return Source.CONTINUE;
+            });
+        uint watchdog = Timeout.add_seconds(
+            /* interval= */ 12,
+            /* function= */ () =>
+            {
+                GLib.error("Channel transport timed out");
+            });
+        assert(app.run() == 0);
+        Source.remove(watchdog);
+        poll = 0;
+        assert(phase == 3);
+        var dir = Dir.open(directory);
+        string? filename;
+        uint files = 0;
+        while ((filename = dir.read_name()) != null)
+        {
+            assert(filename.has_suffix(".mkv"));
+            FileUtils.unlink(filename);
+            files++;
+        }
+        assert(files == 1);
+        Environment.set_current_dir(original);
+        DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        Environment.set_current_dir(original);
+        GLib.error("%s", error.message);
+    }
+}
+
 /** Register and run the Vala unit and synthetic recording integration checks. */
 int main(string[] args)
 {
@@ -319,5 +582,7 @@ int main(string[] args)
     Test.add_func("/studio/primary-monitor", test_geometry);
     Test.add_func("/studio/encoded-framerate", test_encoded_rate);
     Test.add_func("/studio/transport-and-audio", test_transport);
+    Test.add_func("/studio/channel-recording", test_channel_recording);
+    Test.add_func("/studio/channel-transport", test_channel_transport);
     return Test.run();
 }

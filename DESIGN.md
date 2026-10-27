@@ -10,6 +10,8 @@ The application starts stopped, with live camera and screen previews and audio m
 
 The large preview displays the selected source. Clicking a thumbnail changes only the displayed source, including during recording. Each preview button has a centered resolution/target-FPS summary above the image and its source name below the image. An audio dropdown beneath the button selects a discovered input, Computer audio, or No audio. Dropdowns are enabled only while paused. Assignments survive pipeline rebuilds and subsequent takes within the current run, but are not saved across application launches.
 
+A default-on Record channel toggle below each thumbnail controls whether its video and selected audio appear in subsequent takes. Toggles are editable only while paused, preserve their values across rebuilds, and do not interrupt preview when changed. A large red X marks excluded thumbnails using a click-through drawing overlay bound to the channel's inclusion state. Disabled channels retain live previews and meters, including during other channels' takes, but have no encoder/frame counter or muxed video track. Their audio is recorded only if an enabled channel also selects it. Screen's toggle additionally controls the independent computer-audio track. With every channel off, Play is disabled and no empty take can be created.
+
 Audio meters overlay thumbnail images. The main preview's top-left overlay shows the selected source's negotiated target FPS and actual post-encoding recording FPS. Actual FPS is a ten-second rolling average of complete encoded video frames, refreshed every quarter-second. It uses available sampling time during warmup, resets for each take, and shows a dash while paused. The measurement comes from the recording branch and is independent of preview frame delivery. It measures encoder output throughput, not physical sensor synchronization or durable disk writes.
 
 ## Source and build layout
@@ -56,7 +58,7 @@ On X11, `xrandr --query` identifies the active primary monitor. `ximagesrc` capt
 
 On Wayland, the ScreenCast portal creates a session, requests single-monitor selection, waits for user consent, and provides a PipeWire remote descriptor and stream target. The portable portal API cannot automatically identify/select the primary monitor, so the user must select it in the chooser. Multiple returned streams are rejected. The portal descriptor and session remain alive until application shutdown; cancellation, denial, or session closure fails capture. The media startup timeout does not run while the user is choosing a monitor.
 
-Computer audio uses `pulsesrc device=@DEFAULT_MONITOR@` through PulseAudio or `pipewire-pulse`, capturing the default output monitor rather than the default microphone. It remains a separate required input even if the screen's dropdown is assigned a different microphone or No audio. That assignment determines the screen's associated meter/track metadata; it does not disable the independent computer-audio track.
+Computer audio uses `pulsesrc device=@DEFAULT_MONITOR@` through PulseAudio or `pipewire-pulse`, capturing the default output monitor rather than the default microphone. While Screen is enabled for recording, computer audio remains a separate track even if its dropdown selects another microphone or No audio. Disabling Screen removes that independent track; computer audio can still be recorded if another enabled channel explicitly selects it. The dropdown determines Screen's associated meter/track metadata.
 
 ## Capture and recording graphs
 
@@ -75,6 +77,8 @@ audio input -> audioconvert -> audioresample -> F32LE / interleaved / 48 kHz
 
 shared matroskamux -> filesink -> one MKV per take
 ```
+
+Only enabled video channels receive an encoder/writer branch in a take. Disabled channels retain their preview branch; headless mode terminates their video at a fakesink. Audio from disabled channels still feeds meters but terminates at a fakesink unless an enabled channel selects the same input or enabled Screen requires computer audio. Audio tags list only enabled camera associations.
 
 In preview-only mode, video has no encoder/writer branch and audio terminates at `fakesink` after metering. Headless synthetic preview uses video `fakesink` elements. No file or hardware encoder is needed for preview-only mode.
 
@@ -96,7 +100,7 @@ Automatic exposure can take time to settle and may make low-light images darker 
 
 ## Output, timestamps, and metadata
 
-Every take contains independent video tracks for the discovered cameras and primary screen, plus one audio track for each unique assigned input and required computer-audio input. Audio is uncompressed IEEE float32 PCM (`F32LE`), interleaved at 48 kHz, preserving negotiated channel count. Do not add audio compression or integer conversion to the recording path.
+Every take contains independent video tracks for enabled cameras and Screen, plus one audio track for each unique input selected by an enabled channel and the independent computer-audio track when Screen is enabled. Audio is uncompressed IEEE float32 PCM (`F32LE`), interleaved at 48 kHz, preserving negotiated channel count. Do not add audio compression or integer conversion to the recording path.
 
 Output names follow `StudioRecorder_<local timestamp with microseconds and UTC offset>_<random suffix>.mkv`. The application exclusively reserves the `.mkv.partial` path and never overwrites an existing take. After EOS and pipeline closure, a hard link publishes the final name without replacing an existing file, then the temporary name is removed. The filesystem must support this operation. Failed/incomplete finalization preserves partial output; crash recovery is not guaranteed.
 
@@ -113,7 +117,7 @@ Paused -> Changing audio -> Preparing preview -> Paused
 Any state -> Exit; an active take is finalized first
 ```
 
-The controller waits for pipeline PLAYING before reporting Paused or Recording. Recording elapsed time begins at that transition. Play and audio selectors are enabled only while paused; Stop is enabled while starting/recording. During finalization, new takes and assignment changes are blocked.
+The controller waits for pipeline PLAYING before reporting Paused or Recording. Recording elapsed time begins at that transition. Channel toggles and audio selectors are enabled only while paused; Play additionally requires at least one enabled channel; Stop is enabled while starting/recording. During finalization, new takes and assignment changes are blocked.
 
 Stop sends EOS to the entire current recording pipeline and waits for all sinks, including the shared muxer/filesink, to finish. It then closes that pipeline and reopens preview. Closing the window, Ctrl-C, or SIGTERM follows the same finalization path but exits instead of reopening preview. Exiting while stopped creates no file.
 
@@ -121,7 +125,7 @@ Media startup has a 30-second timeout; finalization has a ten-second timeout. Pi
 
 ## Validation to date
 
-The current implementation has 17 automated checks: six Vala GLib tests, four executable recording tests, and seven private-D-Bus portal scenarios. They cover RMS-to-meter conversion, the actual v4l2src callback with an invalid descriptor, primary-monitor geometry, rolling encoded FPS, paused startup, multiple takes, audio changes and recording-time locking, resistance to GLib idle starvation, output codecs/tags, decoding every track, command-line validation, SIGINT/SIGTERM finalization, and portal consent/descriptor lifetime. Recording integration uses synthetic sources and native software H.264; `ffprobe`/`ffmpeg` inspect and decode the files. Portal tests use a private D-Bus with a mock service, including the protocol’s string-typed session handle, missing or malformed session handles, responses arriving before method replies, and pending-request cancellation.
+The current implementation has 19 automated checks: eight Vala GLib tests, four executable recording tests, and seven private-D-Bus portal scenarios. They cover channel exclusion/re-enabling, shared-audio deduplication, Screen/computer-audio inclusion, all-off rejection, stopped-only controls, RMS-to-meter conversion, the actual v4l2src callback with an invalid descriptor, primary-monitor geometry, rolling encoded FPS, paused startup, multiple takes, audio changes and recording-time locking, resistance to GLib idle starvation, output codecs/tags, decoding every track, command-line validation, SIGINT/SIGTERM finalization, and portal consent/descriptor lifetime. Recording integration uses synthetic sources and native software H.264; `ffprobe`/`ffmpeg` inspect and decode the files. Portal tests use a private D-Bus with a mock service, including the protocol’s string-typed session handle, missing or malformed session handles, responses arriving before method replies, and pending-request cancellation.
 
 A synthetic GTK preview/record/finalize smoke test also passed. On the current Wayland desktop, a startup smoke test reached live preview readiness after correcting the portal session-handle type; recording and encoder allocation were not exercised by that check. Real X11 capture, Wayland recording, physical camera control writes, hardware encoder allocation, additional GPU backends, multi-camera limits, editor interoperability, long takes, drift, disk exhaustion, and unplug behavior still need validation of the Vala application.
 
