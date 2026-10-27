@@ -85,6 +85,9 @@ public class Input : GLib.Object
         set;
     }
 
+    /** Last saved scalar controls; accessed only on the main loop and copied before capture starts. */
+    public HashTable<string, int> saved_controls = new HashTable<string, int>(str_hash, str_equal);
+
     /** Describe a capture input using its display name and process-local routing identity. */
     public Input (string name, string identity)
     {
@@ -101,7 +104,10 @@ public class Input : GLib.Object
         {
             source = make("v4l2src");
             source.set("device", video_path);
-            lock_framerate(source);
+            var snapshot = new HashTable<string, int>(str_hash, str_equal);
+            foreach (string key in saved_controls.get_keys())
+                snapshot.insert(key, saved_controls.lookup(key));
+            lock_framerate(source, snapshot);
         }
         else if (audio_name != null)
         {

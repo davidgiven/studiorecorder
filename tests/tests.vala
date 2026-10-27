@@ -625,8 +625,109 @@ private void test_preferences()
         other.audio = null;
         new Preferences(path).restore_audio(other, sources);
         assert(other.audio == audio);
+        // Camera values share the stable video-source group and survive intervening audio writes.
+        extended.save_control(video, V4L2.BASE, -12);
+        extended.save_control(video, V4L2.BASE + 1, 0);
+        extended.save_audio(camera);
+        var after_restart = new Preferences(path);
+        var values = after_restart.load_controls(new_video);
+        assert(values.contains(V4L2.BASE.to_string()));
+        assert(values.lookup(V4L2.BASE.to_string()) == -12);
+        assert(values.contains((V4L2.BASE + 1).to_string()));
+        assert(values.lookup((V4L2.BASE + 1).to_string()) == 0);
+        assert(after_restart.load_controls(other.input).size() == 0);
+        after_restart.restore_audio(restored, sources);
+        assert(restored.audio == audio);
         FileUtils.unlink(path);
         DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
+/** Validate real-metadata slider mapping and restore ordering against a simulated V4L2 driver. */
+private void test_camera_controls()
+{
+    try
+    {
+        var device = new FakeCameraControls();
+        var controls = device.probe();
+        assert(controls.length() == 5);
+        var brightness = controls.nth_data(0);
+        assert(brightness.minimum == -64);
+        assert(brightness.maximum == 64);
+        assert(brightness.value_at(0) == -64);
+        assert(brightness.value_at(brightness.last_position()) == 64);
+        assert(brightness.value_at(brightness.position_of(12)) == 12);
+        assert(!brightness.accepts(13));
+        assert(!brightness.accepts(128));
+        assert(!controls.nth_data(2).writable());
+        assert(!controls.nth_data(4).writable());
+        var menu = controls.nth_data(3);
+        assert(menu.choices.length == 3);
+        assert(menu.value_at(0) == 1);
+        assert(menu.value_at(1) == 3);
+        assert(menu.value_at(2) == 7);
+        assert(menu.describe(1) == "300");
+        assert(!menu.accepts(2));
+        assert(menu.default_value == 3);
+
+        // Auto-mode settings restore before manual values, regardless of native ID ordering.
+        var saved = new HashTable<string, int>(str_hash, str_equal);
+        saved.insert(V4L2.BASE.to_string(), 12);
+        saved.insert((V4L2.BASE + 1).to_string(), 0);
+        saved.insert((V4L2.BASE + 2).to_string(), 20);
+        saved.insert((V4L2.BASE + 3).to_string(), 3);
+        saved.insert((V4L2.BASE + 4).to_string(), 24);
+        saved.insert(V4L2.EXPOSURE_AUTO_PRIORITY.to_string(), 1);
+        saved.insert("999", 42);
+        device.restore(saved);
+        assert(!device.automatic);
+        assert(device.read(V4L2.BASE) == 12);
+        assert(device.read(V4L2.BASE + 2) == 20);
+        assert(device.read(V4L2.BASE + 3) == 3);
+        assert(device.writes.length() == 4);
+        assert(device.writes.nth_data(0) == (V4L2.BASE + 1).to_string());
+        assert(device.writes.nth_data(1) == (V4L2.BASE + 3).to_string());
+
+        // Stale ranges and sparse-menu holes are skipped rather than silently clamped and saved.
+        saved = new HashTable<string, int>(str_hash, str_equal);
+        saved.insert(V4L2.BASE.to_string(), 13);
+        saved.insert((V4L2.BASE + 3).to_string(), 2);
+        device.restore(saved);
+        assert(device.writes.length() == 4);
+        device.write(menu.id, menu.default_value);
+        assert(device.read(menu.id) == menu.default_value);
+        device.legacy = true;
+        assert(device.probe().length() == 5);
+
+        // Driver rejections warn and preserve the previously accepted camera value.
+        device.reject_writes = true;
+        saved = new HashTable<string, int>(str_hash, str_equal);
+        saved.insert(V4L2.BASE.to_string(), 16);
+        Test.expect_message(
+            /* log_domain= */ null,
+            /* log_level= */ LogLevelFlags.LEVEL_WARNING,
+            /* pattern= */ "*Test control: Simulated driver rejection*");
+        device.restore(saved);
+        Test.assert_expected_messages();
+        assert(device.read(V4L2.BASE) == 12);
+
+        // The native backend fails gracefully for an invalid device instead of fabricating controls.
+        var unavailable = new CameraControls.borrowed(-1);
+        assert(unavailable.probe().length() == 0);
+        bool failed = false;
+        try
+        {
+            unavailable.read(V4L2.BASE);
+        }
+        catch (Error error)
+        {
+            failed = true;
+        }
+        assert(failed);
     }
     catch (Error error)
     {
@@ -640,6 +741,7 @@ int main(string[] args)
     Test.init(ref args);
     Gst.init(ref args);
     Test.add_func("/studio/camera-framerate-callback", test_camera_framerate_callback);
+    Test.add_func("/studio/camera-controls", test_camera_controls);
     Test.add_func("/studio/preferences", test_preferences);
     Test.add_func("/studio/level-rms", test_level_rms);
     Test.add_func("/studio/rolling-framerate", test_rates);

@@ -68,6 +68,51 @@ public class Preferences : GLib.Object
     public void save_audio(Camera camera)
     {
         settings.set_string(channel_group(camera.input), "audio-source", camera.audio != null ? source_key(camera.audio) : "");
+        save();
+    }
+
+    /** Load saved scalar camera values without removing settings for temporarily absent controls. */
+    public HashTable<string, int> load_controls(Input input)
+    {
+        var values = new HashTable<string, int>(str_hash, str_equal);
+        try
+        {
+            string group = channel_group(input);
+            foreach (string key in settings.get_keys(group))
+            {
+                if (!key.has_prefix("v4l2-"))
+                    continue;
+                uint64 id;
+                string number = key.substring(5);
+                if (!uint64.try_parse(number, out id) || id > uint32.MAX)
+                    continue;
+                try
+                {
+                    values.insert(number, settings.get_integer(group, key));
+                }
+                catch (KeyFileError error)
+                {
+                    warning("Ignoring invalid camera preference %s: %s", key, error.message);
+                }
+            }
+        }
+        catch (KeyFileError error)
+        {
+            // A source without a saved group retains its hardware settings.
+        }
+        return values;
+    }
+
+    /** Persist an accepted camera value alongside the source's audio selection and other keys. */
+    public void save_control(Input input, uint32 id, int value)
+    {
+        settings.set_integer(channel_group(input), "v4l2-" + id.to_string(), value);
+        save();
+    }
+
+    /** Atomically replace the preferences file after creating its private parent directory. */
+    private void save()
+    {
         try
         {
             string directory = Path.get_dirname(path);

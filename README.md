@@ -27,10 +27,12 @@ You'll get a binary called `./studio-recorder`.
 ## Dependencies
 
 For building, install Vala (`valac`), a C compiler, Make, pkg-config, and
-development headers for GTK 4, libadwaita, libpanel, GStreamer, GLib/GIO (including gio-unix), Xlib,
-and Linux V4L2. Install matching runtime packages for:
+development headers for GTK 4, libadwaita, libpanel, GStreamer, GLib/GIO
+(including gio-unix), Xlib, and Linux V4L2. Install matching runtime packages
+for:
 
-- GTK 4.12+, libadwaita 1.4+, libpanel 1.4+, GLib/GIO, GStreamer 1.24+, and libX11.
+- GTK 4.12+, libadwaita 1.4+, libpanel 1.4+, GLib/GIO, GStreamer 1.24+, and
+  libX11.
 - GStreamer core/base/good/bad plugins, including PipeWire, `identity`,
   `decodebin`, `videoconvert`, `videoscale`, `audioconvert`, `audioresample`,
   `level`, `taginject`, `h264parse`, and `matroskamux`.
@@ -67,9 +69,11 @@ This program was written by myself, David Given <dg@cowlark.com>; I have a
 website at <http://cowlark.com>. There may or may not be anything interesting
 there.
 
-Audio selections are saved per video source in
+Audio selections and V4L2 camera-control values are saved per video source in
 `$XDG_CONFIG_HOME/studio-recorder/preferences.ini` (normally
-`~/.config/studio-recorder/preferences.ini`), including explicit No audio choices.
-If a saved microphone is unavailable, the channel uses No audio and keeps the
-saved choice for a later launch. Other channel settings are not yet persisted.
-Synthetic test mode does not access user preferences.
+`~/.config/studio-recorder/preferences.ini`), including explicit No audio
+choices. If a saved microphone is unavailable, the channel uses No audio and
+keeps the saved choice for a later launch. Camera sliders use probed device
+ranges and defaults, with a reset button beside each slider. Accepted values are
+restored at startup and capture rebuilds. Other channel settings are not yet
+persisted. Synthetic test mode does not access user preferences.

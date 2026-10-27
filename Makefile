@@ -6,8 +6,8 @@ VALAC ?= valac
 UNCRUSTIFY ?= uncrustify
 PANDOC ?= pandoc
 VALA_PACKAGES = --pkg gtk4 --pkg libadwaita-1 --pkg libpanel-1 --pkg gstreamer-1.0 --pkg gio-unix-2.0 --pkg posix
-VALA_CAPTURE = src/camera-controls.vala src/capture-utils.vala src/Input.vala src/Camera.vala src/DesktopCapture.vala
-VALA_CORE = $(VALA_CAPTURE) src/Registry.vala src/Preferences.vala src/test-sources.vala \
+VALA_CAPTURE = src/camera-controls.vala src/capture-utils.vala src/Input.vala src/Camera.vala src/CameraControl.vala src/CameraControls.vala src/DesktopCapture.vala
+VALA_CORE = $(VALA_CAPTURE) src/Registry.vala src/CameraControlRow.vala src/CameraControlsPanel.vala src/Preferences.vala src/test-sources.vala \
 	src/RollingFramerate.vala src/VideoTrack.vala src/Recorder.vala src/RecordingWorkspace.vala src/Application.vala
 VALA_NATIVE = src/native.vapi src/v4l2.vapi
 VALA_FLAGS = -g $(VALA_PACKAGES) -X -Isrc -X -lX11 -X -lm
@@ -26,9 +26,9 @@ studio-recorder: $(VALA_CORE) $(VALA_NATIVE) src/main.vala
 	mkdir -p .obj/app
 	$(VALAC) $(VALA_FLAGS) --directory .obj/app -o $(abspath $@) $(VALA_CORE) $(VALA_NATIVE) src/main.vala
 
-.obj/test-unit: $(VALA_CORE) $(VALA_NATIVE) tests/tests.vala
+.obj/test-unit: $(VALA_CORE) $(VALA_NATIVE) tests/FakeCameraControls.vala tests/tests.vala
 	mkdir -p .obj/unit
-	$(VALAC) $(VALA_FLAGS) --directory .obj/unit -o $(abspath $@) $(VALA_CORE) $(VALA_NATIVE) tests/tests.vala
+	$(VALAC) $(VALA_FLAGS) --directory .obj/unit -o $(abspath $@) $(VALA_CORE) $(VALA_NATIVE) tests/FakeCameraControls.vala tests/tests.vala
 
 run: all
 	./studio-recorder $(ARGS)
@@ -41,3 +41,8 @@ test: all .obj/test-unit .obj/test-portal
 .obj/test-portal: $(VALA_CAPTURE) $(VALA_NATIVE) tests/portal-test.vala
 	mkdir -p .obj/portal
 	$(VALAC) $(VALA_FLAGS) --directory .obj/portal -o $(abspath $@) $(VALA_CAPTURE) $(VALA_NATIVE) tests/portal-test.vala
+
+# Optional display-dependent widget checks; run ./.obj/test-controls-ui in a desktop session.
+.obj/test-controls-ui: $(VALA_CAPTURE) $(VALA_NATIVE) src/CameraControlRow.vala tests/FakeCameraControls.vala tests/control-ui-test.vala
+	mkdir -p .obj/controls-ui
+	$(VALAC) $(VALA_FLAGS) --directory .obj/controls-ui -o $(abspath $@) $(VALA_CAPTURE) $(VALA_NATIVE) src/CameraControlRow.vala tests/FakeCameraControls.vala tests/control-ui-test.vala

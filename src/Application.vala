@@ -83,6 +83,7 @@ public class Application : GLib.Object
     private Gtk.Button stop_button;
     private Gtk.Box thumbnails;
     private Gtk.Box preview_controls;
+    private CameraControlsPanel? camera_controls_panel;
     public int exit_code
     {
         get;
@@ -370,7 +371,10 @@ public class Application : GLib.Object
         audio_sources.sort((a, b) => strcmp(a.name + a.identity, b.name + b.identity));
         if (preferences != null)
             foreach (var camera in cameras)
+            {
                 preferences.restore_audio(camera, audio_sources);
+                camera.input.saved_controls = preferences.load_controls(camera.input);
+            }
         prepare_pipeline(false);
     }
 
@@ -695,74 +699,14 @@ public class Application : GLib.Object
         populate_camera_controls(track.camera.input);
     }
 
-    /** Show illustrative camera sliders for the selected source without querying or changing hardware. */
+    /** Probe the selected source's real camera controls without rebuilding capture pipelines. */
     private void populate_camera_controls(Input input)
     {
         Gtk.Widget? child;
         while ((child = preview_controls.get_first_child()) != null)
             preview_controls.remove(child);
-
-        var source = new Gtk.Label(input.name)
-        {
-            xalign = 0,
-            wrap = true
-        };
-        source.add_css_class("heading");
-        preview_controls.append(source);
-
-        // Screen capture has no camera controls; camera sources use an illustrative common set.
-        bool screen = input.identity.has_prefix("desktop-screen");
-        var notice = new Gtk.Label(screen ? "Camera controls are not available for screen capture." : "Preview only — sliders do not change camera settings.")
-        {
-            xalign = 0,
-            wrap = true
-        };
-        notice.add_css_class("dim-label");
-        preview_controls.append(notice);
-        if (screen)
-            return;
-
-        string[] names =
-        {
-            "Brightness", "Contrast", "Saturation", "Hue", "Gamma", "Sharpness",
-            "Gain", "Exposure", "White balance", "Focus", "Zoom", "Backlight"
-        };
-        for (int index = 0; index < names.length; index++)
-        {
-            var column = new Gtk.Box(Gtk.Orientation.VERTICAL, 6);
-            var label = new Gtk.Label(names[index])
-            {
-                wrap = true,
-                xalign = 0
-            };
-            var slider = new Gtk.Scale.with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
-            {
-                hexpand = true,
-                draw_value = true,
-                value_pos = Gtk.PositionType.RIGHT,
-                digits = 0,
-                tooltip_text = names[index] + " (preview only)"
-            };
-            slider.set_value(50);
-            slider.set_size_request(280, -1);
-            disable_slider_scrolling(slider);
-            label.set_mnemonic_widget(slider);
-            column.append(label);
-            column.append(slider);
-            preview_controls.append(column);
-        }
-    }
-
-    /** Disable only the scale's wheel handler so scroll events reach the enclosing scrolled window. */
-    private static void disable_slider_scrolling(Gtk.Scale slider)
-    {
-        var controllers = slider.observe_controllers();
-        for (uint index = 0; index < controllers.get_n_items(); index++)
-        {
-            var controller = controllers.get_item(index) as Gtk.EventControllerScroll;
-            if (controller != null)
-                controller.propagation_phase = Gtk.PropagationPhase.NONE;
-        }
+        camera_controls_panel = new CameraControlsPanel(input, preferences);
+        preview_controls.append(camera_controls_panel);
     }
 
     /** Display a measured rate to one decimal place, or a dash when no sample is available. */
@@ -835,6 +779,8 @@ public class Application : GLib.Object
                 if (new_state == Gst.State.PLAYING)
                 {
                     remove_timer(ref startup_timer);
+                    if (camera_controls_panel != null)
+                        camera_controls_panel.refresh();
                     if (recorder.recording)
                     {
                         recording_started = Gst.Util.get_timestamp();
