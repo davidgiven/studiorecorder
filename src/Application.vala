@@ -119,6 +119,7 @@ public class Application : GLib.Object
         if (!Gtk.init_check())
             throw new RecorderError.FAILED("Cannot open GTK display. Run from a desktop session.");
         Adw.init();
+        Panel.init();
         window = new Gtk.Window();
         window.title = "StudioRecorder — Vala";
         window.set_default_size(960, 640);
@@ -128,7 +129,6 @@ public class Application : GLib.Object
                 request_exit();
                 return true;
             });
-        var layout = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
 
         // The main preview reuses a selected thumbnail paintable rather than opening another capture.
         picture = new Gtk.Picture()
@@ -146,7 +146,7 @@ public class Application : GLib.Object
             margin_start = 8, margin_top = 8, can_target = false
         };
         overlay.add_overlay(fps_label);
-        layout.append(create_preview_controls(overlay));
+        var controls = create_preview_controls();
 
         // Place take controls between the main preview and thumbnail strip.
         var transport = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 12)
@@ -170,84 +170,28 @@ public class Application : GLib.Object
             hexpand = true
         };
         transport.append(transport_label);
-        layout.append(transport);
+        var transport_panel = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
+        transport_panel.append(transport);
 
         // Keep wide collections scrollable while leaving transport and status visible.
         thumbnails = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
         var scroll = new Gtk.ScrolledWindow();
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER);
         scroll.child = thumbnails;
-        layout.append(scroll);
+
         status_label = new Gtk.Label("Discovering capture devices…")
         {
             xalign = 0, wrap = true
         };
-        layout.append(status_label);
-        window.child = layout;
+        transport_panel.append(status_label);
+        window.child = new RecordingWorkspace(overlay, transport_panel, scroll, controls);
         update_transport();
         window.present();
     }
 
-    /** Place a collapsible libadwaita sidebar beside the preview with full-height sash controls. */
-    private Adw.OverlaySplitView create_preview_controls(Gtk.Overlay overlay)
+    /** Build the vertically scrolling video controls hosted by their own dock panel. */
+    private Gtk.Widget create_preview_controls()
     {
-        var split = new Adw.OverlaySplitView()
-        {
-            collapsed = false,
-            show_sidebar = false,
-            sidebar_position = Gtk.PackType.END,
-            min_sidebar_width = 280,
-            max_sidebar_width = 320,
-            hexpand = true,
-            vexpand = true
-        };
-
-        // Reserve space for the opening sash beside the preview only while the panel is hidden.
-        var content = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
-        content.append(overlay);
-        split.content = content;
-        var opener = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0)
-        {
-            halign = Gtk.Align.END,
-            valign = Gtk.Align.FILL
-        };
-        opener.add_css_class("background");
-        var open_button = new Gtk.Button.from_icon_name("pan-start-symbolic")
-        {
-            tooltip_text = "Show controls",
-            vexpand = true
-        };
-        open_button.clicked.connect(() => split.show_sidebar = true);
-        opener.append(open_button);
-        content.append(opener);
-        split.bind_property(
-            /* source_property= */ "show-sidebar",
-            /* target= */ opener,
-            /* target_property= */ "visible",
-            /* flags= */ BindingFlags.SYNC_CREATE | BindingFlags.INVERT_BOOLEAN);
-
-        var sidebar = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
-        var close_button = new Gtk.Button.from_icon_name("pan-end-symbolic")
-        {
-            tooltip_text = "Hide controls",
-            vexpand = true
-        };
-        close_button.clicked.connect(() => split.show_sidebar = false);
-        sidebar.append(close_button);
-        var panel = new Gtk.Box(Gtk.Orientation.VERTICAL, 12)
-        {
-            hexpand = true
-        };
-        var title = new Gtk.Label("Controls")
-        {
-            xalign = 0,
-            margin_start = 16,
-            margin_end = 16,
-            margin_top = 16
-        };
-        title.add_css_class("heading");
-        panel.append(title);
-
         // Future controls belong in this scrollable container, independent of capture rebuilds.
         preview_controls = new Gtk.Box(Gtk.Orientation.VERTICAL, 12)
         {
@@ -261,10 +205,8 @@ public class Application : GLib.Object
             child = preview_controls
         };
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC);
-        panel.append(scroll);
-        sidebar.append(panel);
-        split.sidebar = sidebar;
-        return split;
+        scroll.min_content_width = 180;
+        return scroll;
     }
 
     /** Write progress to the terminal and mirror it in the window when one is present. */
@@ -750,6 +692,77 @@ public class Application : GLib.Object
         selected_identity = track.camera.input.identity;
         picture.paintable = track.paintable;
         show_framerate(track);
+        populate_camera_controls(track.camera.input);
+    }
+
+    /** Show illustrative camera sliders for the selected source without querying or changing hardware. */
+    private void populate_camera_controls(Input input)
+    {
+        Gtk.Widget? child;
+        while ((child = preview_controls.get_first_child()) != null)
+            preview_controls.remove(child);
+
+        var source = new Gtk.Label(input.name)
+        {
+            xalign = 0,
+            wrap = true
+        };
+        source.add_css_class("heading");
+        preview_controls.append(source);
+
+        // Screen capture has no camera controls; camera sources use an illustrative common set.
+        bool screen = input.identity.has_prefix("desktop-screen");
+        var notice = new Gtk.Label(screen ? "Camera controls are not available for screen capture." : "Preview only — sliders do not change camera settings.")
+        {
+            xalign = 0,
+            wrap = true
+        };
+        notice.add_css_class("dim-label");
+        preview_controls.append(notice);
+        if (screen)
+            return;
+
+        string[] names =
+        {
+            "Brightness", "Contrast", "Saturation", "Hue", "Gamma", "Sharpness",
+            "Gain", "Exposure", "White balance", "Focus", "Zoom", "Backlight"
+        };
+        for (int index = 0; index < names.length; index++)
+        {
+            var column = new Gtk.Box(Gtk.Orientation.VERTICAL, 6);
+            var label = new Gtk.Label(names[index])
+            {
+                wrap = true,
+                xalign = 0
+            };
+            var slider = new Gtk.Scale.with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+            {
+                hexpand = true,
+                draw_value = true,
+                value_pos = Gtk.PositionType.RIGHT,
+                digits = 0,
+                tooltip_text = names[index] + " (preview only)"
+            };
+            slider.set_value(50);
+            slider.set_size_request(280, -1);
+            disable_slider_scrolling(slider);
+            label.set_mnemonic_widget(slider);
+            column.append(label);
+            column.append(slider);
+            preview_controls.append(column);
+        }
+    }
+
+    /** Disable only the scale's wheel handler so scroll events reach the enclosing scrolled window. */
+    private static void disable_slider_scrolling(Gtk.Scale slider)
+    {
+        var controllers = slider.observe_controllers();
+        for (uint index = 0; index < controllers.get_n_items(); index++)
+        {
+            var controller = controllers.get_item(index) as Gtk.EventControllerScroll;
+            if (controller != null)
+                controller.propagation_phase = Gtk.PropagationPhase.NONE;
+        }
     }
 
     /** Display a measured rate to one decimal place, or a dash when no sample is available. */

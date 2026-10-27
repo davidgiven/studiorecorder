@@ -27,10 +27,10 @@ You'll get a binary called `./studio-recorder`.
 ## Dependencies
 
 For building, install Vala (`valac`), a C compiler, Make, pkg-config, and
-development headers for GTK 4, libadwaita, GStreamer, GLib/GIO (including gio-unix), Xlib,
+development headers for GTK 4, libadwaita, libpanel, GStreamer, GLib/GIO (including gio-unix), Xlib,
 and Linux V4L2. Install matching runtime packages for:
 
-- GTK 4.12+, libadwaita 1.4+, GLib/GIO, GStreamer 1.24+, and libX11.
+- GTK 4.12+, libadwaita 1.4+, libpanel 1.4+, GLib/GIO, GStreamer 1.24+, and libX11.
 - GStreamer core/base/good/bad plugins, including PipeWire, `identity`,
   `decodebin`, `videoconvert`, `videoscale`, `audioconvert`, `audioresample`,
   `level`, `taginject`, `h264parse`, and `matroskamux`.
