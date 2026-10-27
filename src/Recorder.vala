@@ -188,8 +188,7 @@ public class Recorder : GLib.Object
         // Disabled channels keep live meters but only enabled associations appear in recording metadata.
         foreach (var input in audio.get_values())
         {
-            string[] associated =
-            {};
+            string[] associated = {};
             foreach (var camera in cameras)
                 if ((!recording || camera.record_enabled) && camera.audio != null && camera.audio.identity == input.identity)
                     associated += camera.input.name;

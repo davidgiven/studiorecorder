@@ -41,19 +41,16 @@ public class CameraControls : GLib.Object
     /** Read the actual current value rather than assuming a previous write was accepted unchanged. */
     public virtual int read(uint32 id) throws Error
     {
-        V4L2.ExtControl value =
-        {};
+        V4L2.ExtControl value = {};
         value.id = id;
-        V4L2.ExtControls request =
-        {};
+        V4L2.ExtControls request = {};
         request.count = 1;
         request.controls = &value;
         if (V4L2.ext_controls(descriptor, V4L2.G_EXT_CTRLS, ref request) == 0)
             return value.value;
 
         // Older drivers may expose only the legacy scalar ioctls.
-        V4L2.Control control =
-        {};
+        V4L2.Control control = {};
         control.id = id;
         if (V4L2.set_control(descriptor, V4L2.G_CTRL, ref control) < 0)
             throw new IOError.FAILED("Cannot read camera control: %s", strerror(errno));
@@ -63,19 +60,16 @@ public class CameraControls : GLib.Object
     /** Set a scalar control; callers validate the driver's range and read the accepted value back. */
     public virtual void write(uint32 id, int value) throws Error
     {
-        V4L2.ExtControl scalar =
-        {};
+        V4L2.ExtControl scalar = {};
         scalar.id = id;
         scalar.value = value;
-        V4L2.ExtControls request =
-        {};
+        V4L2.ExtControls request = {};
         request.count = 1;
         request.controls = &scalar;
         if (V4L2.ext_controls(descriptor, V4L2.S_EXT_CTRLS, ref request) == 0)
             return;
 
-        V4L2.Control control =
-        {};
+        V4L2.Control control = {};
         control.id = id;
         control.value = value;
         if (V4L2.set_control(descriptor, V4L2.S_CTRL, ref control) < 0)
@@ -97,14 +91,11 @@ public class CameraControls : GLib.Object
         var control = new CameraControl(query);
         if (control.is_menu())
         {
-            int[] choices =
-            {};
-            string[] labels =
-            {};
+            int[] choices = {};
+            string[] labels = {};
             for (int64 index = query.minimum; index <= query.maximum; index++)
             {
-                V4L2.QueryMenu item =
-                {};
+                V4L2.QueryMenu item = {};
                 item.id = query.id;
                 item.index = (uint32) index;
                 if (!menu(ref item))
@@ -128,8 +119,7 @@ public class CameraControls : GLib.Object
         bool enumerated = false;
         while (true)
         {
-            V4L2.QueryControl query =
-            {};
+            V4L2.QueryControl query = {};
             query.id = previous | V4L2.NEXT_CTRL;
             if (!this.query(ref query) || query.id <= previous)
                 break;
@@ -143,8 +133,7 @@ public class CameraControls : GLib.Object
         {
             for (uint32 id = V4L2.BASE; id < V4L2.LASTP1; id++)
             {
-                V4L2.QueryControl query =
-                {};
+                V4L2.QueryControl query = {};
                 query.id = id;
                 if (!this.query(ref query))
                     continue;
@@ -171,8 +160,7 @@ public class CameraControls : GLib.Object
                 if (!saved.contains(key))
                     continue;
                 int value = saved.lookup(key);
-                V4L2.QueryControl query =
-                {};
+                V4L2.QueryControl query = {};
                 query.id = control.id;
                 if (!this.query(ref query))
                     continue;

@@ -1,8 +1,7 @@
 /** Disable exposure-driven frame intervals without changing the camera's exposure mode. */
 private void prepare_format(string source_name, int descriptor, Gst.Caps caps)
 {
-    V4L2.QueryControl query =
-    {};
+    V4L2.QueryControl query = {};
     query.id = V4L2.EXPOSURE_AUTO_PRIORITY;
 
     // Unsupported or unwritable controls are optional; warn and continue capture.
@@ -14,8 +13,7 @@ private void prepare_format(string source_name, int descriptor, Gst.Caps caps)
     }
 
     // Only this control changes; the driver retains the existing exposure mode.
-    V4L2.Control control =
-    {};
+    V4L2.Control control = {};
     control.id = V4L2.EXPOSURE_AUTO_PRIORITY;
     control.value = 0;
     if (V4L2.set_control(descriptor, V4L2.S_CTRL, ref control) < 0)

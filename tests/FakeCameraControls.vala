@@ -40,8 +40,7 @@ private class FakeCameraControls : CameraControls
             found |= candidate == id;
         if (!found)
             return false;
-        V4L2.QueryControl result =
-        {};
+        V4L2.QueryControl result = {};
         result.id = id;
         result.type = V4L2.INTEGER;
         result.minimum = -64;
@@ -95,8 +94,7 @@ private class FakeCameraControls : CameraControls
     /** Reject unavailable values and log the order in which valid settings were applied. */
     public override void write(uint32 id, int value) throws Error
     {
-        V4L2.QueryControl metadata =
-        {};
+        V4L2.QueryControl metadata = {};
         metadata.id = id;
         if (reject_writes || !query(ref metadata) || (metadata.flags & (V4L2.INACTIVE | V4L2.READ_ONLY)) != 0)
             throw new IOError.FAILED("Simulated driver rejection");

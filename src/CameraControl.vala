@@ -9,10 +9,8 @@ public class CameraControl : GLib.Object
     public int step;
     public int default_value;
     public uint32 flags;
-    public int[] choices =
-    {};
-    public string[] labels =
-    {};
+    public int[] choices = {};
+    public string[] labels = {};
 
     /** Copy metadata out of the kernel structure while its fixed-size name is still available. */
     public CameraControl(V4L2.QueryControl query)

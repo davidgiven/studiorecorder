@@ -80,8 +80,7 @@ public class CameraControlRow : Gtk.Box
     /** Re-read current values and dynamic availability after auto/manual mode changes. */
     public void refresh()
     {
-        V4L2.QueryControl query =
-        {};
+        V4L2.QueryControl query = {};
         query.id = control.id;
         bool available = device.query(ref query);
         if (available)
@@ -113,8 +112,7 @@ public class CameraControlRow : Gtk.Box
     {
         if (updating || !readable || !control.accepts(value))
             return;
-        V4L2.QueryControl query =
-        {};
+        V4L2.QueryControl query = {};
         query.id = control.id;
         if (!device.query(ref query))
         {
