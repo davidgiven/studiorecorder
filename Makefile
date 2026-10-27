@@ -7,7 +7,7 @@ UNCRUSTIFY ?= uncrustify
 PANDOC ?= pandoc
 VALA_PACKAGES = --pkg gtk4 --pkg gstreamer-1.0 --pkg gio-unix-2.0 --pkg posix
 VALA_CAPTURE = src/camera-controls.vala src/capture-utils.vala src/Input.vala src/Camera.vala src/DesktopCapture.vala
-VALA_CORE = $(VALA_CAPTURE) src/Registry.vala src/test-sources.vala \
+VALA_CORE = $(VALA_CAPTURE) src/Registry.vala src/Preferences.vala src/test-sources.vala \
 	src/RollingFramerate.vala src/VideoTrack.vala src/Recorder.vala src/Application.vala
 VALA_NATIVE = src/native.vapi src/v4l2.vapi
 VALA_FLAGS = -g $(VALA_PACKAGES) -X -Isrc -X -lX11 -X -lm

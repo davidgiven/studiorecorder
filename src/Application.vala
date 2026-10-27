@@ -53,6 +53,7 @@ public class Application : GLib.Object
 {
     private MainLoop loop = new MainLoop();
     private Registry registry = new Registry();
+    private Preferences? preferences;
     private DesktopCapture? desktop;
     private Recorder? recorder;
     private List<Camera> cameras = new List<Camera> ();
@@ -105,6 +106,8 @@ public class Application : GLib.Object
         this.synthetic = synthetic;
         this.headless = headless;
         this.duration = duration;
+        if (!synthetic)
+            preferences = new Preferences();
         if (!headless)
             create_window();
     }
@@ -342,6 +345,9 @@ public class Application : GLib.Object
                 required_audio.append(audio);
         }
         audio_sources.sort((a, b) => strcmp(a.name + a.identity, b.name + b.identity));
+        if (preferences != null)
+            foreach (var camera in cameras)
+                preferences.restore_audio(camera, audio_sources);
         prepare_pipeline(false);
     }
 
@@ -464,6 +470,8 @@ public class Application : GLib.Object
             if ((camera.audio != null ? camera.audio.identity : null) == audio_identity)
                 return false;
             camera.audio = audio;
+            if (preferences != null)
+                preferences.save_audio(camera);
             set_state(TransportState.PREPARING);
             // Let the dropdown notification finish; normal priority prevents redraw starvation.
             Idle.add(

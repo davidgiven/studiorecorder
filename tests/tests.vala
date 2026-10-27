@@ -571,12 +571,76 @@ private void test_channel_transport()
     }
 }
 
+/** Verify restart persistence, stable identities, explicit silence, and unavailable-device retention. */
+private void test_preferences()
+{
+    try
+    {
+        string directory = DirUtils.make_tmp("studio-preferences-XXXXXX");
+        string path = Path.build_filename(directory, "preferences.ini");
+        var video = new Input("Camera", "transient-video-1");
+        video.preference_id = "usb-camera/video-index0";
+        var audio = new Input("Microphone", "transient-audio-1");
+        audio.preference_id = "alsa_input.usb-microphone";
+        var camera = new Camera(video, audio);
+        var sources = new List<Input>();
+        sources.append(audio);
+        var preferences = new Preferences(path);
+
+        // Missing preferences leave automatic association intact.
+        preferences.restore_audio(camera, sources);
+        assert(camera.audio == audio);
+        preferences.save_audio(camera);
+        var reopened = new Preferences(path);
+        var new_video = new Input("Renamed camera", "transient-video-2");
+        new_video.preference_id = video.preference_id;
+        var restored = new Camera(new_video);
+        reopened.restore_audio(restored, sources);
+        assert(restored.audio == audio);
+
+        // A missing microphone must not silently select another one or erase the saved override.
+        reopened.restore_audio(restored, new List<Input>());
+        assert(restored.audio == null);
+        reopened.restore_audio(restored, sources);
+        assert(restored.audio == audio);
+        restored.audio = null;
+        reopened.save_audio(restored);
+        restored.audio = audio;
+        new Preferences(path).restore_audio(restored, sources);
+        assert(restored.audio == null);
+
+        // Channel groups remain independent and preserve unrelated future keys.
+        var other = new Camera(new Input("Other", "other-channel"), audio);
+        reopened.save_audio(other);
+        var contents = new KeyFile();
+        contents.load_from_file(path, KeyFileFlags.NONE);
+        contents.set_boolean("channel:other-channel", "future-setting", true);
+        contents.save_to_file(path);
+        var extended = new Preferences(path);
+        extended.save_audio(camera);
+        contents.load_from_file(path, KeyFileFlags.NONE);
+        assert(contents.get_boolean("channel:other-channel", "future-setting"));
+        extended.restore_audio(restored, sources);
+        assert(restored.audio == audio);
+        other.audio = null;
+        new Preferences(path).restore_audio(other, sources);
+        assert(other.audio == audio);
+        FileUtils.unlink(path);
+        DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
 /** Register and run the Vala unit and synthetic recording integration checks. */
 int main(string[] args)
 {
     Test.init(ref args);
     Gst.init(ref args);
     Test.add_func("/studio/camera-framerate-callback", test_camera_framerate_callback);
+    Test.add_func("/studio/preferences", test_preferences);
     Test.add_func("/studio/level-rms", test_level_rms);
     Test.add_func("/studio/rolling-framerate", test_rates);
     Test.add_func("/studio/primary-monitor", test_geometry);

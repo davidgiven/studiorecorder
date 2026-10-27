@@ -77,6 +77,37 @@ public class Registry : GLib.Object
         return null;
     }
 
+    /** Prefer persistent V4L2 links, then backend node names, over transient routing identities. */
+    private static string preference_identity(Input input, string node)
+    {
+        if (input.video_path != null)
+        {
+            foreach (string directory in new string[] { "/dev/v4l/by-id", "/dev/v4l/by-path" })
+            {
+                try
+                {
+                    var links = Dir.open(directory);
+                    string? name;
+                    string? selected = null;
+                    while ((name = links.read_name()) != null)
+                    {
+                        string path = Path.build_filename(directory, name);
+                        if (Posix.realpath(path) == Posix.realpath(input.video_path) &&
+                            (selected == null || strcmp(path, selected) < 0))
+                            selected = path;
+                    }
+                    if (selected != null)
+                        return selected;
+                }
+                catch (FileError error)
+                {
+                    // A backend without persistent links can still expose a stable node name.
+                }
+            }
+        }
+        return node.length > 0 ? node : input.identity;
+    }
+
     /** Enumerate PipeWire inputs and assign microphones only when physical identity matches uniquely. */
     public List<Camera> discover() throws Error
     {
@@ -109,6 +140,7 @@ public class Registry : GLib.Object
             else
                 input.audio_name = node.length > 0 ? node : null;
             input.physical_id = physical_id(props, input.video_path);
+            input.preference_id = preference_identity(input, node);
             if (kind == "Video/Source")
                 videos.append(input);
             else

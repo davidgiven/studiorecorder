@@ -66,3 +66,10 @@ BSD license. Look at the LICENSE file for the full text.
 This program was written by myself, David Given <dg@cowlark.com>; I have a
 website at <http://cowlark.com>. There may or may not be anything interesting
 there.
+
+Audio selections are saved per video source in
+`$XDG_CONFIG_HOME/studio-recorder/preferences.ini` (normally
+`~/.config/studio-recorder/preferences.ini`), including explicit No audio choices.
+If a saved microphone is unavailable, the channel uses No audio and keeps the
+saved choice for a later launch. Other channel settings are not yet persisted.
+Synthetic test mode does not access user preferences.

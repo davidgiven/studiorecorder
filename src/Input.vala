@@ -11,6 +11,12 @@ public class Input : GLib.Object
         get;
         construct;
     }
+    /** Stable preferences identity, independent of backend routing identifiers. */
+    public string? preference_id
+    { get;
+      set;
+    }
+
     public string? physical_id
     {
         get;
