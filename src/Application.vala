@@ -82,6 +82,7 @@ public class Application : GLib.Object
     private Gtk.Button play_button;
     private Gtk.Button stop_button;
     private Gtk.Box thumbnails;
+    private Gtk.Box preview_controls;
     public int exit_code
     {
         get;
@@ -117,6 +118,7 @@ public class Application : GLib.Object
     {
         if (!Gtk.init_check())
             throw new RecorderError.FAILED("Cannot open GTK display. Run from a desktop session.");
+        Adw.init();
         window = new Gtk.Window();
         window.title = "StudioRecorder — Vala";
         window.set_default_size(960, 640);
@@ -144,7 +146,7 @@ public class Application : GLib.Object
             margin_start = 8, margin_top = 8, can_target = false
         };
         overlay.add_overlay(fps_label);
-        layout.append(overlay);
+        layout.append(create_preview_controls(overlay));
 
         // Place take controls between the main preview and thumbnail strip.
         var transport = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 12)
@@ -184,6 +186,85 @@ public class Application : GLib.Object
         window.child = layout;
         update_transport();
         window.present();
+    }
+
+    /** Place a collapsible libadwaita sidebar beside the preview with full-height sash controls. */
+    private Adw.OverlaySplitView create_preview_controls(Gtk.Overlay overlay)
+    {
+        var split = new Adw.OverlaySplitView()
+        {
+            collapsed = false,
+            show_sidebar = false,
+            sidebar_position = Gtk.PackType.END,
+            min_sidebar_width = 280,
+            max_sidebar_width = 320,
+            hexpand = true,
+            vexpand = true
+        };
+
+        // Reserve space for the opening sash beside the preview only while the panel is hidden.
+        var content = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+        content.append(overlay);
+        split.content = content;
+        var opener = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0)
+        {
+            halign = Gtk.Align.END,
+            valign = Gtk.Align.FILL
+        };
+        opener.add_css_class("background");
+        var open_button = new Gtk.Button.from_icon_name("pan-start-symbolic")
+        {
+            tooltip_text = "Show controls",
+            vexpand = true
+        };
+        open_button.clicked.connect(() => split.show_sidebar = true);
+        opener.append(open_button);
+        content.append(opener);
+        split.bind_property(
+            /* source_property= */ "show-sidebar",
+            /* target= */ opener,
+            /* target_property= */ "visible",
+            /* flags= */ BindingFlags.SYNC_CREATE | BindingFlags.INVERT_BOOLEAN);
+
+        var sidebar = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+        var close_button = new Gtk.Button.from_icon_name("pan-end-symbolic")
+        {
+            tooltip_text = "Hide controls",
+            vexpand = true
+        };
+        close_button.clicked.connect(() => split.show_sidebar = false);
+        sidebar.append(close_button);
+        var panel = new Gtk.Box(Gtk.Orientation.VERTICAL, 12)
+        {
+            hexpand = true
+        };
+        var title = new Gtk.Label("Controls")
+        {
+            xalign = 0,
+            margin_start = 16,
+            margin_end = 16,
+            margin_top = 16
+        };
+        title.add_css_class("heading");
+        panel.append(title);
+
+        // Future controls belong in this scrollable container, independent of capture rebuilds.
+        preview_controls = new Gtk.Box(Gtk.Orientation.VERTICAL, 12)
+        {
+            margin_start = 16,
+            margin_end = 16,
+            margin_bottom = 16
+        };
+        var scroll = new Gtk.ScrolledWindow()
+        {
+            vexpand = true,
+            child = preview_controls
+        };
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC);
+        panel.append(scroll);
+        sidebar.append(panel);
+        split.sidebar = sidebar;
+        return split;
     }
 
     /** Write progress to the terminal and mirror it in the window when one is present. */
