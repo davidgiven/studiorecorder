@@ -148,7 +148,7 @@ public class Application : GLib.Object
         {
             margin_start = 8, margin_end = 8
         };
-        play_button = new Gtk.Button.with_label("▶ Play")
+        play_button = new Gtk.Button.with_label("● Record")
         {
             tooltip_text = "Start a new recording"
         };
