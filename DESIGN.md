@@ -201,3 +201,10 @@ entry.
 It uses synthetic media to check selection, widget identity, and retained preview
 images across resolution, FPS, audio, and take transitions. This does not
 validate physical device restart latency or seamless capture.
+
+Thumbnail cards use a fixed 192 × 108 (16:9) native image viewport inside a
+216-pixel-wide card. `ThumbnailImage` fixes measurement and allocation so
+source resolution or aspect ratio cannot resize the strip. GTK contains the
+video in that viewport, while the meter and exclusion X share its bounds.
+Source names, format summaries, and selected audio names ellipsize on a single
+line; full source and audio names remain available as tooltips.

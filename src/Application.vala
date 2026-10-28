@@ -656,6 +656,34 @@ public class Application : GLib.Object
             }
     }
 
+    /** Ellipsize selected audio names so device labels cannot widen thumbnail cards. */
+    private static Gtk.ListItemFactory thumbnail_audio_factory()
+    {
+        var factory = new Gtk.SignalListItemFactory();
+        factory.setup.connect(
+            /* handler= */ (item) =>
+            {
+                ((Gtk.ListItem) item).child = new Gtk.Label(null)
+                {
+                    xalign = 0,
+                    ellipsize = Pango.EllipsizeMode.END,
+                    max_width_chars = 1,
+                    single_line_mode = true
+                };
+            });
+
+        // Keep the complete device name available even when its visible text is clipped.
+        factory.bind.connect(
+            /* handler= */ (item) =>
+            {
+                var row = (Gtk.ListItem) item;
+                var label = (Gtk.Label) row.child;
+                label.label = ((Gtk.StringObject) row.item).get_string();
+                label.tooltip_text = label.label;
+            });
+        return factory;
+    }
+
     /** Rebuild thumbnails and audio selectors while preserving the selected main preview. */
     private void populate_previews()
     {
@@ -676,16 +704,20 @@ public class Application : GLib.Object
             var column = new Gtk.Box(Gtk.Orientation.VERTICAL, 2);
             var details = new Gtk.Label("— × — · — fps")
             {
-                xalign = 0.5f, can_target = false
+                xalign = 0.5f,
+                can_target = false,
+                ellipsize = Pango.EllipsizeMode.END,
+                max_width_chars = 1,
+                single_line_mode = true
             };
             column.append(details);
 
             // Keep the video image and its overlays separate from source labels and selectors.
             var image = new Gtk.Picture.for_paintable(track.paintable)
             {
-                can_shrink = true
+                can_shrink = true,
+                content_fit = Gtk.ContentFit.CONTAIN
             };
-            image.set_size_request(180, 110);
             var overlay = new Gtk.Overlay()
             {
                 child = image
@@ -714,16 +746,28 @@ public class Application : GLib.Object
                 /* target_property= */ "visible",
                 /* flags= */ BindingFlags.SYNC_CREATE | BindingFlags.INVERT_BOOLEAN);
             overlay.add_overlay(exclusion);
-            column.append(overlay);
+            column.append(new ThumbnailImage(overlay));
 
             // Thumbnail clicks select video without changing its audio assignment.
-            column.append(new Gtk.Label(camera.input.name));
+            column.append(
+                /* child= */ new Gtk.Label(camera.input.name)
+                {
+                    ellipsize = Pango.EllipsizeMode.END,
+                    max_width_chars = 1,
+                    single_line_mode = true,
+                    tooltip_text = camera.input.name
+                });
             var button = new Gtk.Button()
             {
                 child = column
             };
             button.clicked.connect(() => select_source(camera.input.identity));
-            var item = new Gtk.Box(Gtk.Orientation.VERTICAL, 2);
+            var item = new Gtk.Box(Gtk.Orientation.VERTICAL, 2)
+            {
+                width_request = 216,
+                halign = Gtk.Align.START,
+                valign = Gtk.Align.START
+            };
             item.append(button);
 
             // Keep the dropdown outside the preview button so interacting with it does not select video.
@@ -742,7 +786,9 @@ public class Application : GLib.Object
             }
             var selector = new Gtk.DropDown.from_strings(names)
             {
-                selected = selected, sensitive = state == TransportState.PAUSED && !exiting,
+                selected = selected,
+                sensitive = state == TransportState.PAUSED && !exiting,
+                factory = thumbnail_audio_factory(),
                 tooltip_text = "Audio input (editable while paused)"
             };
             selector.notify["selected"].connect(
