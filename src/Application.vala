@@ -82,6 +82,7 @@ public class Application : GLib.Object
     private Gtk.Picture picture;
     private Gtk.Label fps_label;
     private Gtk.Label transport_label;
+    private Gtk.Stack transport_status;
     private Gtk.Label status_label;
     private Gtk.Button play_button;
     private Gtk.Button stop_button;
@@ -200,8 +201,8 @@ public class Application : GLib.Object
         stop_button.clicked.connect(stop);
         transport.append(play_button);
         transport.append(stop_button);
-        transport_label = new Gtk.Label(null);
-        transport.append(transport_label);
+        // Measure every status at its actual rendered font size, including a long elapsed-time sample.
+        transport.append(create_transport_status());
 
         // Keep wide collections scrollable while leaving transport and status visible.
         thumbnails = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
@@ -229,6 +230,40 @@ public class Application : GLib.Object
         window.child = layout;
         update_transport();
         window.present();
+    }
+
+    /** Reserve stable status dimensions using real rendered labels rather than base-font character counts. */
+    private Gtk.Widget create_transport_status()
+    {
+        transport_status = new Gtk.Stack()
+        {
+            hhomogeneous = true,
+            vhomogeneous = true,
+            transition_type = Gtk.StackTransitionType.NONE
+        };
+        transport_label = create_transport_label("00:00:00");
+        transport_status.add_named(transport_label, "recording");
+        transport_status.add_named(create_transport_label("PAUSED", true), "paused");
+        transport_status.add_named(create_transport_label("Starting…"), "starting");
+        transport_status.add_named(create_transport_label("Finalizing…"), "finalizing");
+
+        // The hidden sample keeps the allocation stable as elapsed digits change or hours grow.
+        transport_status.add_named(create_transport_label("000000:00:00"), "reserve");
+        return transport_status;
+    }
+
+    /** Render one complete status line without truncation at the shared prominent font size. */
+    private static Gtk.Label create_transport_label(string text, bool paused = false)
+    {
+        var label = new Gtk.Label(null)
+        {
+            single_line_mode = true
+        };
+        label.set_markup(
+            /* str= */ "<span font_family='monospace' size='xx-large' weight='bold'%s>%s</span>".printf(
+                /* foreground= */ paused ? " foreground='#ff2020'" : "",
+                /* text= */ Markup.escape_text(text)));
+        return label;
     }
 
     /** Build a traditional File/View menu bar backed by window actions and native dock properties. */
@@ -626,17 +661,18 @@ public class Application : GLib.Object
         {
             uint64 elapsed = (Gst.Util.get_timestamp() - recording_started) / Gst.SECOND;
             transport_label.set_markup(
-                /* str= */ "<span size='xx-large' weight='bold'>%02u:%02u:%02u</span>".printf(
+                /* str= */ "<span font_family='monospace' size='xx-large' weight='bold'>%02u:%02u:%02u</span>".printf(
                     /* hours= */ (uint) (elapsed / 3600),
                     /* minutes= */ (uint) ((elapsed / 60) % 60),
                     /* seconds= */ (uint) (elapsed % 60)));
+            transport_status.visible_child_name = "recording";
         }
         else if (state == TransportState.FINALIZING)
-            transport_label.label = "Finalizing…";
+            transport_status.visible_child_name = "finalizing";
         else if (state == TransportState.STARTING)
-            transport_label.label = "Starting…";
+            transport_status.visible_child_name = "starting";
         else
-            transport_label.set_markup("<span foreground='#ff2020' size='xx-large' weight='bold'>PAUSED</span>");
+            transport_status.visible_child_name = "paused";
     }
 
     /** Draw a high-contrast red exclusion mark scaled to the thumbnail's allocation. */

@@ -244,3 +244,11 @@ checks actual restored controls width, window size, and X11 coordinates across
 both launches. Preference checks cover defaults, malformed geometry, display
 state, and preservation of channel settings. Wayland compositor placement is
 not asserted by these checks.
+
+The toolbar transport status uses a homogeneous GtkStack to measure Paused,
+Starting, Finalizing, and elapsed time at their actual large, bold monospace
+font size. A hidden six-digit-hours sample reserves stable space as the timer
+changes. Labels do not ellipsize: base-font character limits underestimate the
+space needed by enlarged markup. The GTK recording regression checks toolbar
+and status dimensions through transitions and verifies the visible text fits
+without ellipsizing or clipping.

@@ -55,6 +55,22 @@ private Gtk.Picture? find_main_picture(Gtk.Widget root)
     return null;
 }
 
+/** Locate the permanent toolbar independently of the dock's widget structure. */
+private Gtk.Widget? find_toolbar(Gtk.Widget root)
+{
+    if (root.has_css_class("toolbar"))
+        return root;
+
+    // Search descendants only after checking the current widget's role.
+    for (var child = root.get_first_child(); child != null; child = child.get_next_sibling())
+    {
+        var found = find_toolbar(child);
+        if (found != null)
+            return found;
+    }
+    return null;
+}
+
 /** Check actual GTK selection and widget retention through format, audio, and take rebuilds. */
 private void test_preview_rebuild()
 {
@@ -75,6 +91,11 @@ private void test_preview_rebuild()
         Gtk.Picture? preview = null;
         VideoControlsView? controls_view = null;
         int controls_width = 0;
+        Gtk.Widget? toolbar = null;
+        Gtk.Widget? transport_text = null;
+        int toolbar_height = 0;
+        int transport_width = 0;
+        int transport_height = 0;
         int phase = 0;
         int ticks = 0;
 
@@ -116,6 +137,14 @@ private void test_preview_rebuild()
                     }
                     assert(found_about);
 
+                    // Record the paused toolbar geometry before exercising capture and take transitions.
+                    toolbar = find_toolbar(window);
+                    assert(toolbar != null);
+                    transport_text = toolbar.get_first_child().get_next_sibling().get_next_sibling();
+                    toolbar_height = toolbar.get_height();
+                    transport_width = transport_text.get_width();
+                    transport_height = transport_text.get_height();
+
                     // Choose a non-first source before changing its format through the actual widgets.
                     controls_view = (VideoControlsView) find_widget(window, typeof(VideoControlsView));
                     controls_width = controls_view.get_width();
@@ -141,6 +170,20 @@ private void test_preview_rebuild()
                     phase++;
                     return Source.CONTINUE;
                 }
+
+                // Status strings must not resize the toolbar, including Starting and Finalizing states.
+                assert(toolbar.get_height() == toolbar_height);
+                assert(transport_text.get_width() == transport_width);
+                assert(transport_text.get_height() == transport_height);
+
+                // The elapsed counter must fit its rendered large font without ellipsizing or clipping.
+                var visible_status = (Gtk.Label) ((Gtk.Stack) transport_text).visible_child;
+                var text_layout = visible_status.get_layout();
+                int text_width, text_height;
+                text_layout.get_pixel_size(out text_width, out text_height);
+                assert(!text_layout.is_ellipsized());
+                assert(visible_status.get_width() >= text_width);
+                assert(visible_status.get_height() >= text_height);
 
                 // Even while replacement sinks are empty, the main preview retains a visible frame.
                 assert(preview.paintable != null && preview.paintable.get_intrinsic_width() > 0);
