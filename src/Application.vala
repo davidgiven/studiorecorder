@@ -152,11 +152,15 @@ public class Application : GLib.Object
         overlay.add_overlay(fps_label);
         var controls = create_preview_controls();
 
-        // Place take controls between the main preview and thumbnail strip.
+        // Keep take controls and status in a permanent toolbar beneath the menu bar.
         var transport = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 12)
         {
-            margin_start = 8, margin_end = 8
+            margin_start = 8,
+            margin_end = 8,
+            margin_top = 4,
+            margin_bottom = 4
         };
+        transport.add_css_class("toolbar");
         play_button = new Gtk.Button.with_label("● Record")
         {
             tooltip_text = "Start a new recording"
@@ -169,13 +173,8 @@ public class Application : GLib.Object
         stop_button.clicked.connect(stop);
         transport.append(play_button);
         transport.append(stop_button);
-        transport_label = new Gtk.Label(null)
-        {
-            hexpand = true
-        };
+        transport_label = new Gtk.Label(null);
         transport.append(transport_label);
-        var transport_panel = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
-        transport_panel.append(transport);
 
         // Keep wide collections scrollable while leaving transport and status visible.
         thumbnails = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
@@ -185,12 +184,63 @@ public class Application : GLib.Object
 
         status_label = new Gtk.Label("Discovering capture devices…")
         {
-            xalign = 0, wrap = true
+            xalign = 0,
+            hexpand = true,
+            ellipsize = Pango.EllipsizeMode.END,
+            single_line_mode = true,
+            max_width_chars = 1
         };
-        transport_panel.append(status_label);
-        window.child = new RecordingWorkspace(overlay, transport_panel, scroll, controls);
+        transport.append(status_label);
+
+        // Menus and transport stay outside the dock so panel visibility never hides them.
+        var workspace = new RecordingWorkspace(overlay, scroll, controls);
+        var layout = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
+        layout.append(create_menu_bar(workspace));
+        layout.append(transport);
+        layout.append(new Gtk.Separator(Gtk.Orientation.HORIZONTAL));
+        layout.append(workspace);
+        window.child = layout;
         update_transport();
         window.present();
+    }
+
+    /** Build a traditional File/View menu bar backed by window actions and native dock properties. */
+    private Gtk.Widget create_menu_bar(RecordingWorkspace workspace)
+    {
+        var actions = new SimpleActionGroup();
+        var about = new SimpleAction("about", null);
+        about.activate.connect(() => show_about());
+        actions.add_action(about);
+        var exit = new SimpleAction("exit", null);
+        exit.activate.connect(() => request_exit());
+        actions.add_action(exit);
+        window.insert_action_group("window", actions);
+        window.insert_action_group("view", workspace.view_actions);
+
+        // Property-backed View actions stay checked when dock visibility changes elsewhere.
+        var file = new Menu();
+        file.append("_About", "window.about");
+        file.append("E_xit", "window.exit");
+        var menu = new Menu();
+        menu.append_submenu("_File", file);
+        menu.append_submenu("_View", workspace.view_menu);
+        return new Gtk.PopoverMenuBar.from_model(menu);
+    }
+
+    /** Present application information without interrupting an active capture or take. */
+    private void show_about()
+    {
+        var dialog = new Gtk.AboutDialog()
+        {
+            transient_for = window,
+            modal = true,
+            program_name = "StudioRecorder",
+            comments = "Multitrack video and audio recorder for Linux.",
+            authors = new string[]
+            { "David Given" },
+            website = "https://cowlark.com/"
+        };
+        dialog.present();
     }
 
     /** Build the vertically scrolling video controls hosted by their own dock panel. */
@@ -219,7 +269,10 @@ public class Application : GLib.Object
         stdout.printf("%s\n", message);
         stdout.flush();
         if (window != null)
+        {
             status_label.label = message;
+            status_label.tooltip_text = message;
+        }
     }
 
     /** Publish a transport transition after bringing control sensitivity and labels up to date. */

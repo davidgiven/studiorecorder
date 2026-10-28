@@ -90,3 +90,8 @@ current-format queries use the first negotiated preview format. Screen offers
 native, half, and quarter dimensions with selectable target FPS. Selections are
 saved per source across launches; unavailable saved modes retain the current
 capture format.
+
+The File menu contains About and Exit; Exit finalizes an active take before
+closing. The View menu toggles the Left, Right, Top, and Bottom panel areas.
+Recording controls and status remain in a toolbar below the menu bar even when
+panels are hidden.

@@ -2,9 +2,11 @@
 public class RecordingWorkspace : Gtk.Box
 {
     private Panel.Dock dock;
+    public Menu view_menu = new Menu();
+    public SimpleActionGroup view_actions = new SimpleActionGroup();
 
-    /** Arrange four independently movable panels with the preview centered and controls alongside. */
-    public RecordingWorkspace(Gtk.Widget preview, Gtk.Widget transport, Gtk.Widget thumbnails, Gtk.Widget controls)
+    /** Arrange three independently movable panels with the preview centered and controls alongside. */
+    public RecordingWorkspace(Gtk.Widget preview, Gtk.Widget thumbnails, Gtk.Widget controls)
     {
         Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
 
@@ -22,7 +24,6 @@ public class RecordingWorkspace : Gtk.Box
                 <child type="bottom">
                   <object class="PanelPaned">
                     <property name="orientation">vertical</property>
-                    <child><object class="PanelFrame" id="transport"/></child>
                     <child><object class="PanelFrame" id="thumbnails"/></child>
                   </object>
                 </child>
@@ -38,7 +39,6 @@ public class RecordingWorkspace : Gtk.Box
         // Stable panel IDs identify the UI roles; media state stays owned by Application.
         var main_preview = create_panel("main-preview", "Main preview", "camera-video-symbolic", preview);
         grid.add(main_preview);
-        add_to_frame((Panel.Frame) builder.get_object("transport"), create_panel("transport", "Recording and status", "media-record-symbolic", transport));
         add_to_frame((Panel.Frame) builder.get_object("thumbnails"), create_panel("thumbnails", "Sources", "view-grid-symbolic", thumbnails));
         // Keep the controls split inside the preview area, above the full-width bottom panels.
         grid.insert_column(1);
@@ -50,20 +50,11 @@ public class RecordingWorkspace : Gtk.Box
                 /* icon_name= */ "preferences-system-symbolic",
                 /* child= */ controls));
 
-        // Area toggles remain accessible even when an entire docking area is hidden.
-        var visibility = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6)
-        {
-            margin_start = 8,
-            margin_end = 8,
-            margin_top = 4,
-            margin_bottom = 4
-        };
-        visibility.append(new Gtk.Label("Panels"));
-        add_area_toggle(visibility, "Left", "reveal-start");
-        add_area_toggle(visibility, "Right", "reveal-end");
-        add_area_toggle(visibility, "Top", "reveal-top");
-        add_area_toggle(visibility, "Bottom", "reveal-bottom");
-        append(visibility);
+        // Expose checked menu actions so hidden docking areas remain reachable above the workspace.
+        add_area_toggle("Left panels", "left", "reveal-start");
+        add_area_toggle("Right panels", "right", "reveal-end");
+        add_area_toggle("Top panels", "top", "reveal-top");
+        add_area_toggle("Bottom panels", "bottom", "reveal-bottom");
         append(dock);
     }
 
@@ -137,15 +128,11 @@ public class RecordingWorkspace : Gtk.Box
                };
     }
 
-    /** Bind a dock area's visibility to an always-reachable button. */
-    private void add_area_toggle(Gtk.Box toolbar, string label, string property)
+    /** Reflect native dock visibility in a checked View menu action, including changes made by docking. */
+    private void add_area_toggle(string label, string name, string property)
     {
-        var toggle = new Gtk.ToggleButton.with_label(label);
-        dock.bind_property(
-            /* source_property= */ property,
-            /* target= */ toggle,
-            /* target_property= */ "active",
-            /* flags= */ BindingFlags.SYNC_CREATE | BindingFlags.BIDIRECTIONAL);
-        toolbar.append(toggle);
+        var action = new PropertyAction(name, dock, property);
+        view_actions.add_action(action);
+        view_menu.append(label, "view." + name);
     }
 }

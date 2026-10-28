@@ -89,6 +89,31 @@ private void test_preview_rebuild()
                     if (app.transport_state != TransportState.PAUSED || ticks < 10)
                         return Source.CONTINUE;
 
+                    // View actions remain reachable outside the dock and track its native visibility.
+                    assert(find_widget(window, typeof(Gtk.PopoverMenuBar)) != null);
+                    var dock = (Panel.Dock) find_widget(window, typeof(Panel.Dock));
+                    assert(dock.reveal_bottom);
+                    assert(window.activate_action("view.bottom", null));
+                    assert(!dock.reveal_bottom);
+                    assert(window.activate_action("view.bottom", null));
+                    assert(dock.reveal_bottom);
+
+                    // The About action opens a separate dialog without replacing the recording workspace.
+                    assert(window.activate_action("window.about", null));
+                    bool found_about = false;
+                    for (uint index = 0; index < windows.get_n_items(); index++)
+                    {
+                        var about = windows.get_item(index) as Gtk.AboutDialog;
+                        if (about != null)
+                        {
+                            assert(about.program_name == "StudioRecorder");
+                            about.destroy();
+                            found_about = true;
+                            break;
+                        }
+                    }
+                    assert(found_about);
+
                     // Choose a non-first source before changing its format through the actual widgets.
                     screen = find_source(window, "Screen");
                     assert(screen != null);
@@ -152,21 +177,35 @@ private void test_preview_rebuild()
                         var thumbnail = (Gtk.Picture) find_widget(screen, typeof(Gtk.Picture));
                         assert(preview.paintable == thumbnail.paintable);
                         assert(app.transport_state == TransportState.PAUSED);
-                        app.request_exit();
-                        return Source.REMOVE;
+                        app.play();
+                        phase++;
+                        break;
+
+                    case 6:
+                        if (app.transport_state == TransportState.RECORDING)
+                        {
+                            // Exit must finalize the active take through the regular shutdown path.
+                            assert(window.activate_action("window.exit", null));
+                            phase++;
+                            return Source.REMOVE;
+                        }
+                        break;
                 }
                 return Source.CONTINUE;
             });
 
         // Run until all transitions have completed, then remove only this test’s recordings.
         assert(app.run() == 0);
-        assert(phase == 5);
+        assert(phase == 7);
         assert(timer != 0);
         Environment.set_current_dir(original);
         var recordings = Dir.open(directory);
         string? name;
         while ((name = recordings.read_name()) != null)
+        {
+            assert(name.has_suffix(".mkv"));
             FileUtils.unlink(Path.build_filename(directory, name));
+        }
         DirUtils.remove(directory);
     }
     catch (Error error)
