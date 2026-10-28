@@ -71,6 +71,26 @@ public class Preferences : GLib.Object
         save();
     }
 
+    /** Restore recording inclusion while retaining the default for missing or malformed settings. */
+    public void restore_record_enabled(Camera camera)
+    {
+        try
+        {
+            camera.record_enabled = settings.get_boolean(channel_group(camera.input), "record-enabled");
+        }
+        catch (KeyFileError error)
+        {
+            // New channels and invalid preferences retain their default-on inclusion.
+        }
+    }
+
+    /** Save inclusion independently of the source's audio, capture format, and camera controls. */
+    public void save_record_enabled(Camera camera)
+    {
+        settings.set_boolean(channel_group(camera.input), "record-enabled", camera.record_enabled);
+        save();
+    }
+
     /** Restore only a still-supported mode, keeping the probed current mode for stale settings. */
     public void restore_video_mode(Input input)
     {

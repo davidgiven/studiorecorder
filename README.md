@@ -76,8 +76,10 @@ choices. If a saved microphone is unavailable, the channel uses No audio and
 keeps the saved choice for a later launch. Camera sliders use probed device
 ranges and defaults, with a reset button beside each slider. Accepted values are
 restored at startup and capture rebuilds. Resolution and frame-rate selections
-are also saved per source. Other channel settings are not yet persisted.
-Synthetic test mode does not access user preferences.
+and each Record channel on/off choice are also saved per source. Channels
+without a saved choice start enabled; if all saved channels are off, enable one
+to use Play. Other channel settings are not yet persisted. Synthetic test mode
+does not access user preferences.
 
 Resolution and frame-rate dropdowns appear below the selected source's name,
 above its camera adjustments. Change them while paused; the live preview is

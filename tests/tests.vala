@@ -672,6 +672,62 @@ private void test_preferences()
         new Preferences(path).restore_video_mode(new_video);
         assert(new_video.video_mode == current_mode);
 
+        // New channels default on; saved exclusion follows stable identity across routing changes.
+        var inclusion = new Preferences(path);
+        inclusion.restore_record_enabled(restored);
+        assert(restored.record_enabled);
+        camera.record_enabled = false;
+        inclusion.save_record_enabled(camera);
+        inclusion.save_audio(camera);
+        inclusion.save_video_mode(video);
+        inclusion.save_control(video, V4L2.BASE, -12);
+        new Preferences(path).restore_record_enabled(restored);
+        assert(!restored.record_enabled);
+        new Preferences(path).restore_record_enabled(other);
+        assert(other.record_enabled);
+
+        // Inclusion writes preserve audio, format, camera controls, and unrelated future settings.
+        contents.load_from_file(path, KeyFileFlags.NONE);
+        string video_group = "channel:" + Uri.escape_string(video.preference_id, null, false);
+        assert(contents.get_string(video_group, "audio-source") == audio.preference_id);
+        assert(contents.get_integer(video_group, "video-width") == 1920);
+        assert(contents.get_integer(video_group, "v4l2-" + V4L2.BASE.to_string()) == -12);
+        assert(contents.get_boolean("channel:other-channel", "future-setting"));
+        camera.record_enabled = true;
+        inclusion.save_record_enabled(camera);
+        new Preferences(path).restore_record_enabled(restored);
+        assert(restored.record_enabled);
+
+        // X11 and Wayland screen routes share the same saved inclusion choice.
+        var x11_screen = new Camera(new Input("Screen", "desktop-screen"));
+        var wayland_screen = new Camera(new Input("Screen 1", "desktop-screen-1"));
+        x11_screen.record_enabled = false;
+        inclusion.save_record_enabled(x11_screen);
+        new Preferences(path).restore_record_enabled(wayland_screen);
+        assert(!wayland_screen.record_enabled);
+
+        // Preserve an all-off configuration rather than silently enabling a channel on restart.
+        camera.record_enabled = false;
+        other.record_enabled = false;
+        inclusion.save_record_enabled(camera);
+        inclusion.save_record_enabled(other);
+        var all_off = new Preferences(path);
+        restored.record_enabled = true;
+        other.record_enabled = true;
+        all_off.restore_record_enabled(restored);
+        all_off.restore_record_enabled(other);
+        all_off.restore_record_enabled(wayland_screen);
+        assert(!restored.record_enabled && !other.record_enabled && !wayland_screen.record_enabled);
+
+        // A malformed boolean is ignored, keeping a newly discovered channel enabled.
+        contents.load_from_file(path, KeyFileFlags.NONE);
+        contents.set_string(video_group, "record-enabled", "invalid");
+        contents.save_to_file(path);
+        var invalid_channel = new Camera(new_video);
+        new Preferences(path).restore_record_enabled(invalid_channel);
+        assert(invalid_channel.record_enabled);
+
+        // Remove only this test's private preference file and directory.
         FileUtils.unlink(path);
         DirUtils.remove(directory);
     }

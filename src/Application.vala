@@ -377,6 +377,7 @@ public class Application : GLib.Object
             foreach (var camera in cameras)
             {
                 preferences.restore_audio(camera, audio_sources);
+                preferences.restore_record_enabled(camera);
                 camera.input.saved_controls = preferences.load_controls(camera.input);
             }
 
@@ -473,11 +474,14 @@ public class Application : GLib.Object
         if (state != TransportState.PAUSED || exiting)
             return false;
 
+        // Persist an accepted inclusion change before updating transport readiness and its thumbnail.
         foreach (var camera in cameras)
         {
             if (camera.input.identity != video_identity || camera.record_enabled == enabled)
                 continue;
             camera.record_enabled = enabled;
+            if (preferences != null)
+                preferences.save_record_enabled(camera);
             update_transport();
             status(has_recording_channels() ? "Paused — ready to record." : "Enable a channel to record.");
             return true;
