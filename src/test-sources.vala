@@ -29,3 +29,21 @@ public List<Camera> test_cameras()
             /* audio= */ test_input("Computer audio", "desktop-audio", false, 2)));
     return cameras;
 }
+
+/** Constrain a synthetic source before capture negotiation to emulate native-only hardware PCM. */
+public Gst.Element test_audio_source(Input input) throws Error
+{
+    var bin = new Gst.Bin(null);
+    var source = make("audiotestsrc");
+    source.set("is-live", true, "freq", 440.0 + input.pattern * 220.0);
+    var format = make("capsfilter");
+    format.set("caps", Gst.Caps.from_string(input.test_audio_caps));
+    bin.add(source);
+    bin.add(format);
+    if (!source.link(format))
+        throw new RecorderError.FAILED("Cannot constrain synthetic native audio format.");
+
+    // Expose only the constrained pad so Recorder negotiates against the emulated hardware modes.
+    bin.add_pad(new Gst.GhostPad("src", format.get_static_pad("src")));
+    return bin;
+}

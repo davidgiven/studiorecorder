@@ -8,7 +8,7 @@ StudioRecorder is a local Linux multitrack recorder implemented in Vala with GTK
 
 The application starts stopped, with live camera and screen previews and audio meters. No recording file is created until Play is pressed. A control bar between the main preview and thumbnails contains Play/Stop and prominent red PAUSED text, replaced by HH:MM:SS elapsed time during recording. Each Play creates a separate timestamped MKV in the working directory. Stop drains and closes that take before returning to live preview. Controls prevent overlapping take transitions.
 
-The large preview displays the selected source. Clicking a thumbnail changes only the displayed source, including during recording. Each preview button has a centered resolution/target-FPS summary above the image and its source name below the image. An audio dropdown beneath the button selects a discovered input, Computer audio, or No audio. Dropdowns are enabled only while paused. Assignments survive pipeline rebuilds and are saved across application launches in `$XDG_CONFIG_HOME/studio-recorder/preferences.ini` (default `~/.config/studio-recorder/preferences.ini`). Each video source owns an extensible channel group; its `audio-source` key stores a persistent audio identity, with an empty value representing explicit No audio. Missing keys retain automatic association. Unavailable saved microphones use No audio without erasing the saved choice. Camera keys prefer `/dev/v4l/by-id`, then `/dev/v4l/by-path`, then backend node names; audio keys prefer backend node names. Sources without stable metadata fall back to routing identities and may lose their match after device renumbering. X11 and Wayland Screen share one channel key. Synthetic mode does not read or write user preferences. Write failures warn and leave the live selection usable.
+The large preview displays the selected source. Clicking a thumbnail changes only the displayed source, including during recording. Each preview button has a centered resolution/target-FPS summary above the image and its source name below the image. An audio dropdown beneath the button selects a discovered input, Computer audio, or No audio. Dropdowns are enabled only while paused. Assignments survive pipeline rebuilds and are saved across application launches in `$XDG_CONFIG_HOME/studio-recorder/preferences.ini` (default `~/.config/studio-recorder/preferences.ini`). Each video source owns an extensible channel group; its `audio-source` key stores a persistent audio identity, with an empty value representing explicit No audio. Missing keys retain automatic association. Unavailable saved microphones use No audio without erasing the saved choice. Camera keys prefer `/dev/v4l/by-id`, then `/dev/v4l/by-path`, then backend node names; audio keys use ALSA card/PCM identities for hardware, retaining backend node names as migration aliases, or backend identities for non-ALSA inputs. Sources without stable metadata fall back to routing identities and may lose their match after device renumbering. X11 and Wayland Screen share one channel key. Synthetic mode does not read or write user preferences. Write failures warn and leave the live selection usable.
 
 A default-on Record channel toggle below each thumbnail controls whether its video and selected audio appear in subsequent takes. Toggles are editable only while paused, preserve their values across rebuilds, and do not interrupt preview when changed. Their `record-enabled` preference is saved in each stable video-source group and restored before the initial preview is built. Missing or malformed values retain the default-on setting; an all-off saved configuration keeps Play disabled until a channel is enabled. X11 and Wayland Screen share the same saved inclusion choice. A large red X marks excluded thumbnails using a click-through drawing overlay bound to the channel's inclusion state. Disabled channels retain live previews and meters, including during other channels' takes, but have no encoder/frame counter or muxed video track. Their audio is recorded only if an enabled channel also selects it. Screen's toggle additionally controls the independent computer-audio track. With every channel off, Play is disabled and no empty take can be created.
 
@@ -53,7 +53,7 @@ There is one pipeline per preview mode or take. Play closes the preview pipeline
 
 ## Discovery and audio assignment
 
-Discovery uses the GStreamer PipeWire device provider directly. Physical V4L2 webcams are captured through `v4l2src` using their advertised device paths. This avoids the observed case where PipeWire advertises a webcam but its capture stream fails with “target not found.” Other video sources use provider-created capture elements. Named PipeWire audio inputs open through `pulsesrc` using their node names on the PulseAudio-compatible service; provider capture remains the fallback when no node name is available. Physical webcam routing recognizes alternate V4L2 path metadata even when `device.api` is absent.
+Discovery uses the GStreamer PipeWire device provider directly. Physical V4L2 webcams are captured through `v4l2src` using their advertised device paths. This avoids the observed case where PipeWire advertises a webcam but its capture stream fails with “target not found.” Other video sources use provider-created capture elements. Physical microphones use `alsasrc` with explicit `hw:card,device` routing derived from provider PCM metadata. `/proc/asound/pcm` supplements capture devices missing from the sound server's active profile, and sysfs USB ancestry still associates microphones with cameras. Duplicate provider profiles for one hardware PCM are collapsed. ALSA card identifiers and PCM numbers form stable audio preference keys, with older provider node names retained as aliases so saved assignments continue to resolve. A successfully resolved alias is saved under the new hardware identity so later launches do not need the old provider profile. Non-ALSA virtual inputs are explicitly labeled “sound server”; these retain `pulsesrc` or provider capture rather than claiming direct hardware access. Physical webcam routing recognizes alternate V4L2 path metadata even when `device.api` is absent.
 
 Physical audio association uses shared USB ancestry in sysfs, with PipeWire's kernel USB bus metadata as a fallback. Names alone do not establish a match. Missing or ambiguous matches default to No audio and can be resolved using the paused audio selector. The selector also offers discovered microphones that were not automatically associated with a camera. Multiple cameras can share one audio input; capture and recording deduplicate it by identity.
 
@@ -81,8 +81,9 @@ video input -> decodebin -> raw video tee
                                  -> AVC / AU alignment -> track tags
                                  -> native frame counter -> queue -> shared matroskamux
 
-audio input -> audioconvert -> audioresample -> F32LE / interleaved / 48 kHz
-            -> level -> track tags -> queue -> shared matroskamux
+audio input -> hardware-supported PCM caps -> tee
+            |-> queue -> track tags -> shared matroskamux (native PCM)
+            `-> leaky queue -> audioconvert -> level -> fakesink (meter only)
 
 shared matroskamux -> filesink -> one MKV per take
 ```
@@ -109,7 +110,7 @@ Automatic exposure can take time to settle and may make low-light images darker 
 
 ## Output, timestamps, and metadata
 
-Every take contains independent video tracks for enabled cameras and Screen, plus one audio track for each unique input selected by an enabled channel and the independent computer-audio track when Screen is enabled. Audio is uncompressed IEEE float32 PCM (`F32LE`), interleaved at 48 kHz, preserving negotiated channel count. Do not add audio compression or integer conversion to the recording path.
+Every take contains independent video tracks for enabled cameras and Screen, plus one audio track for each unique input selected by an enabled channel and the independent computer-audio track when Screen is enabled. Audio is uncompressed interleaved PCM in the capture source's negotiated format, rate, and channel count. The source is opened to READY before caps probing so float32 is selected only when actually supported, rather than merely present in a plugin template. `AudioFormat` prefers F32LE and otherwise retains the source's order of Matroska-compatible PCM formats. There is no audio converter, resampler, or encoder in the recording branch; metering converts on an independent leaky branch because `level` cannot accept packed 24-bit PCM. ALSA uses `hw:` rather than a plug/default device, and capture clock slaving uses re-timestamping rather than resampling. Unsupported native PCM fails rather than being transcoded. Computer audio and explicitly marked virtual inputs can still be converted internally by the sound server; only direct ALSA microphones have the raw-hardware guarantee.
 
 Output names follow `StudioRecorder_<local timestamp with microseconds and UTC offset>_<random suffix>.mkv`. The application exclusively reserves the `.mkv.partial` path and never overwrites an existing take. After EOS and pipeline closure, a hard link publishes the final name without replacing an existing file, then the temporary name is removed. The filesystem must support this operation. Failed/incomplete finalization preserves partial output; crash recovery is not guaranteed.
 
@@ -155,7 +156,7 @@ Historical hardware tests of the retired Python implementation exercised a C920 
 - [ScreenCast portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html): consent, stream selection, and remote descriptors.
 - [ximagesrc](https://gstreamer.freedesktop.org/documentation/ximagesrc/): X11 capture rectangles and threading.
 - [gtk4paintablesink](https://gstreamer.freedesktop.org/documentation/gtk4/index.html): GTK rendering.
-- [matroskamux](https://gstreamer.freedesktop.org/documentation/matroska/matroskamux.html): video/float32 audio formats and muxing.
+- [matroskamux](https://gstreamer.freedesktop.org/documentation/matroska/matroskamux.html): video/native PCM formats and muxing.
 - [identity](https://gstreamer.freedesktop.org/documentation/coreelements/identity.html): native encoded-buffer counters.
 - [V4L2 camera controls](https://docs.kernel.org/userspace-api/media/v4l/ext-ctrls-camera.html): exposure and dynamic frame-rate control.
 - [Matroska tags](https://www.matroska.org/technical/tagging.html) and [tag precedence](https://www.matroska.org/technical/tags-precedence.html): track identification and reader compatibility.
@@ -252,3 +253,23 @@ changes. Labels do not ellipsize: base-font character limits underestimate the
 space needed by enlarged markup. The GTK recording regression checks toolbar
 and status dimensions through transitions and verifies the visible text fits
 without ellipsizing or clipping.
+
+Native audio checks record and decode synthetic S16LE, packed S24LE, S32LE, and
+F32LE sources with 44.1/48/88.2/96 kHz rates and mono/stereo/four-channel layouts.
+They verify saved codecs, rate/channel preservation, float32 preference when
+both integer and float capture are available, working meters for packed 24-bit,
+unsupported-format rejection, ALSA metadata mapping, kernel capture discovery,
+and migration from older audio preference identities. These are synthetic
+checks, not physical microphone validation. Direct ALSA access can be exclusive;
+a device already owned by PipeWire or another client must be released, and the
+application does not suspend clients or fall back to software-converted audio.
+Multiple hardware clocks, drift, and physical capture still require validation.
+See the [ALSA hw plugin documentation](https://www.alsa-project.org/alsa-doc/alsa-lib/pcm_plugins.html)
+for the distinction between raw hardware and conversion plugins.
+
+The main preview overlay includes negotiated video resolution and the selected
+input's capture PCM format, channel count, and sample frequency in Hz. Audio
+caps are read before the tee and meter conversion, so packed 24-bit and other
+native formats are reported accurately. Screen also lists independent computer
+audio when enabled and assigned a different microphone or No audio. Pending
+negotiation is shown explicitly rather than guessed from caps templates.

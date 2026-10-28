@@ -32,7 +32,7 @@ public class Registry : GLib.Object
     }
 
     /** Resolve sysfs links and find the USB device shared by its video and audio interfaces. */
-    private static string? usb_parent(string path)
+    internal static string? usb_parent(string path)
     {
         string? current = Posix.realpath(path);
         while (current != null && current != "/")
@@ -108,6 +108,17 @@ public class Registry : GLib.Object
         return node.length > 0 ? node : input.identity;
     }
 
+    /** Mark virtual or non-ALSA inputs explicitly rather than representing them as hardware capture. */
+    private static Input backend_audio(Input original)
+    {
+        var input = new Input(original.name + " (sound server)", original.identity);
+        input.device = original.device;
+        input.audio_name = original.audio_name;
+        input.physical_id = original.physical_id;
+        input.preference_id = original.preference_id;
+        return input;
+    }
+
     /** Enumerate PipeWire inputs and assign microphones only when physical identity matches uniquely. */
     public List<Camera> discover() throws Error
     {
@@ -141,10 +152,48 @@ public class Registry : GLib.Object
                 input.audio_name = node.length > 0 ? node : null;
             input.physical_id = physical_id(props, input.video_path);
             input.preference_id = preference_identity(input, node);
+            // Physical microphones bypass the sound server; virtual inputs remain explicitly labeled.
+            if (kind == "Audio/Source")
+            {
+                string? hardware = AlsaDevices.hardware(props);
+                if (hardware != null)
+                {
+                    input.alsa_device = hardware;
+                    input.add_preference_alias(input.preference_id);
+                    input.preference_id = AlsaDevices.identity(hardware);
+
+                    // Multiple sound-server profiles for one PCM must share a single hardware capture.
+                    Input? existing = null;
+                    foreach (var audio in audio_sources)
+                        if (audio.alsa_device == hardware)
+                            existing = audio;
+                    if (existing != null)
+                    {
+                        existing.add_preference_alias(input.preference_aliases[0]);
+                        continue;
+                    }
+                }
+                else if (node.has_prefix("alsa_input.") || field(props, "device.api") == "alsa" ||
+                         field(props, "api.alsa.path") != null || field(props, "api.alsa.pcm.card") != null ||
+                         field(props, "alsa.card") != null)
+                    continue;
+                else
+                    input = backend_audio(input);
+            }
             if (kind == "Video/Source")
                 videos.append(input);
             else
                 audio_sources.append(input);
+        }
+
+        // Include hardware capture PCMs even when PipeWire has no active profile for them.
+        foreach (var native in AlsaDevices.discover())
+        {
+            bool found = false;
+            foreach (var audio in audio_sources)
+                found |= audio.alsa_device == native.alsa_device;
+            if (!found)
+                audio_sources.append(native);
         }
 
         // Sort the UI choices, then associate only unambiguous physical matches.

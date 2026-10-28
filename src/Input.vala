@@ -85,6 +85,13 @@ public class Input : GLib.Object
         set;
     }
 
+    /** Raw ALSA PCM routing for microphones; backend names remain for computer/virtual audio. */
+    public string? alsa_device;
+    public string[] preference_aliases = {};
+
+    /** Explicit native caps for synthetic audio fixtures only. */
+    public string? test_audio_caps;
+
     /** Detected capture modes and the explicit selection retained across pipeline rebuilds. */
     public List<VideoMode> video_modes = new List<VideoMode>();
     public VideoMode? video_mode;
@@ -99,10 +106,20 @@ public class Input : GLib.Object
         Object(name: name, identity: identity);
     }
 
+    /** Retain an older backend preference identity when hardware capture replaces its routing. */
+    public void add_preference_alias(string alias)
+    {
+        string[] aliases = preference_aliases;
+        aliases += alias;
+        preference_aliases = aliases;
+    }
+
     /** Open this input through its explicit capture backend or provider-created source. */
     public Gst.Element create_element() throws Error
     {
         Gst.Element source;
+        if (factory == "audiotestsrc" && test_audio_caps != null)
+            return test_audio_source(this);
 
         // Prefer stable device paths and PulseAudio node names over provider numeric targets.
         if (video_path != null)
@@ -113,6 +130,14 @@ public class Input : GLib.Object
             foreach (string key in saved_controls.get_keys())
                 snapshot.insert(key, saved_controls.lookup(key));
             lock_framerate(source, snapshot);
+        }
+        else if (alsa_device != null)
+        {
+            source = make("alsasrc");
+            source.set("device", alsa_device);
+
+            // Align timestamps without rate conversion or sample insertion/removal for clock slaving.
+            Gst.Util.set_object_arg(source, "slave-method", "re-timestamp");
         }
         else if (audio_name != null)
         {

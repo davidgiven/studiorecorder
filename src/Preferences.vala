@@ -56,9 +56,16 @@ public class Preferences : GLib.Object
             return;
         foreach (var source in sources)
         {
-            if (source_key(source) == saved)
+            bool matches = source_key(source) == saved;
+            foreach (string alias in source.preference_aliases)
+                matches |= alias == saved;
+            if (matches)
             {
                 camera.audio = source;
+
+                // Migrate a resolved backend alias once so future launches no longer need its profile.
+                if (source_key(source) != saved)
+                    save_audio(camera);
                 return;
             }
         }

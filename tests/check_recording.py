@@ -62,7 +62,7 @@ class ValaRecordingTests(unittest.TestCase):
         self.assertEqual([s["codec_name"] for s in videos], ["h264"] * 3)
         self.assertEqual([s["codec_name"] for s in audios], ["pcm_f32le"] * 2)
         for stream in audios:
-            self.assertEqual(stream["sample_rate"], "48000")
+            self.assertEqual(stream["sample_rate"], "44100")
         for stream in info["streams"]:
             self.assertTrue(stream["tags"].get("TITLE"))
             self.assertTrue(stream["tags"].get("COMMENTS"))

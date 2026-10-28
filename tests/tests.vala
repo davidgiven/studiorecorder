@@ -906,6 +906,184 @@ private void test_video_modes()
     assert(numerator == 30000 && denominator == 1001);
 }
 
+/** Verify a constrained native source survives metering and Matroska muxing without PCM conversion. */
+private void verify_native_audio(string caps, string codec, int rate, int channels)
+{
+    string original = Environment.get_current_dir();
+    try
+    {
+        string directory = DirUtils.make_tmp("studio-native-audio-XXXXXX");
+        Environment.set_current_dir(directory);
+        var audio = test_input("Native microphone", "native-audio", false, 0);
+        audio.test_audio_caps = caps;
+        var cameras = new List<Camera>();
+        cameras.append(new Camera(test_input("Camera", "native-video", true, 0), audio));
+        var recorder = new Recorder(true, false, true);
+        recorder.build(cameras, new List<Input>());
+
+        // Record actual native buffers while checking that the independent meter remains active.
+        var loop = new MainLoop();
+        var bus = recorder.pipeline.get_bus();
+        bus.add_signal_watch();
+        bool finalized = false;
+        int levels = 0;
+        ulong handler = bus.message.connect(
+            /* handler= */ (message) =>
+            {
+                if (message.type == Gst.MessageType.ERROR)
+                    GLib.error("%s", recorder.describe_error(message));
+                if (message.type == Gst.MessageType.ELEMENT && message.get_structure().get_name() == "level")
+                    levels++;
+                if (message.type == Gst.MessageType.EOS)
+                {
+                    finalized = true;
+                    loop.quit();
+                }
+            });
+        recorder.start();
+        Timeout.add(
+            /* interval= */ 400,
+            /* function= */ () =>
+            {
+                assert(recorder.stop());
+                return Source.REMOVE;
+            });
+        uint watchdog = Timeout.add_seconds(
+            /* interval= */ 12,
+            /* function= */ () =>
+            {
+                GLib.error("Native audio recording timed out");
+            });
+        loop.run();
+        Source.remove(watchdog);
+        assert(finalized && levels > 0);
+        string negotiated_audio = recorder.audio_summary(audio);
+        assert(negotiated_audio.contains(rate.to_string() + " Hz"));
+        assert(negotiated_audio.contains(channels.to_string() + " channels"));
+        assert(negotiated_audio.contains(codec == "pcm_f32le" ? "F32LE" : codec == "pcm_s24le" ? "S24LE" : codec == "pcm_s32le" ? "S32LE" : "S16LE"));
+        bus.disconnect(handler);
+        bus.remove_signal_watch();
+        recorder.close(true);
+
+        // Container metadata must retain the exact input format, sample rate, and channel count.
+        string output;
+        int result;
+        Process.spawn_sync(
+            /* working_directory= */ null,
+            /* argv= */ new string[] { "ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+                                       "stream=codec_name,sample_rate,channels", "-of", "compact", recorder.final_path },
+            /* envp= */ null,
+            /* _flags= */ SpawnFlags.SEARCH_PATH,
+            /* child_setup= */ null,
+            /* standard_output= */ out output,
+            /* standard_error= */ null,
+            /* wait_status= */ out result);
+        assert(result == 0);
+        assert(output.contains("codec_name=" + codec));
+        assert(output.contains("sample_rate=" + rate.to_string()));
+        assert(output.contains("channels=" + channels.to_string()));
+
+        // Decode every native audio track as well, catching malformed PCM payloads and mux metadata.
+        Process.spawn_sync(
+            /* working_directory= */ null,
+            /* argv= */ new string[] { "ffmpeg", "-v", "error", "-xerror", "-i", recorder.final_path,
+                                       "-map", "0:a", "-f", "null", "-" },
+            /* envp= */ null,
+            /* _flags= */ SpawnFlags.SEARCH_PATH,
+            /* child_setup= */ null,
+            /* standard_output= */ null,
+            /* standard_error= */ null,
+            /* wait_status= */ out result);
+        assert(result == 0);
+        FileUtils.unlink(recorder.final_path);
+        Environment.set_current_dir(original);
+        DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        Environment.set_current_dir(original);
+        GLib.error("%s", error.message);
+    }
+}
+
+/** Cover integer fallback, packed 24-bit metering, native rates/channels, and preferred float32. */
+private void test_native_audio()
+{
+    verify_native_audio("audio/x-raw,format=S16LE,layout=interleaved,rate=44100,channels=1", "pcm_s16le", 44100, 1);
+    verify_native_audio("audio/x-raw,format=S24LE,layout=interleaved,rate=96000,channels=2", "pcm_s24le", 96000, 2);
+    verify_native_audio("audio/x-raw,format=S32LE,layout=interleaved,rate=48000,channels=4", "pcm_s32le", 48000, 4);
+    verify_native_audio("audio/x-raw,format=F32LE,layout=interleaved,rate=88200,channels=2", "pcm_f32le", 88200, 2);
+    verify_native_audio("audio/x-raw,format=(string){S16LE,F32LE},layout=interleaved,rate=44100,channels=2", "pcm_f32le", 44100, 2);
+
+    // A hardware format that Matroska cannot represent must not be silently transcoded.
+    bool rejected = false;
+    try
+    {
+        AudioFormat.capture_caps(Gst.Caps.from_string("audio/x-raw,format=S24_32LE,layout=interleaved,rate=48000,channels=2"));
+    }
+    catch (Error error)
+    {
+        rejected = true;
+    }
+    assert(rejected);
+}
+
+/** Verify provider mapping, native-only discovery, backend preference migration, and raw source selection. */
+private void test_alsa_discovery()
+{
+    try
+    {
+        var properties = new Gst.Structure.empty("properties");
+        properties.set("api.alsa.pcm.card", typeof(string), "9999", "api.alsa.pcm.device", typeof(int), 2);
+        assert(AlsaDevices.hardware(properties) == "hw:9999,2");
+        var source = new Input("Microphone", "microphone");
+        source.alsa_device = "hw:9999,2";
+        source.audio_name = "must-not-use-sound-server";
+        var element = source.create_element();
+        assert(element.get_factory().get_name() == "alsasrc");
+        string device;
+        element.get("device", out device);
+        assert(device == "hw:9999,2");
+
+        // Parse capture endpoints without offering playback-only PCMs as microphones.
+        var inputs = AlsaDevices.parse("99-00: Mic : Native : capture 1\n99-01: Playback : Output : playback 1\n99-02: Duplex : Native : playback 1 : capture 1");
+        assert(inputs.length() == 2);
+        assert(inputs.nth_data(0).alsa_device == "hw:99,0");
+        assert(inputs.nth_data(1).alsa_device == "hw:99,2");
+        var fallback = new Gst.Structure.empty("properties");
+        fallback.set("api.alsa.path", typeof(string), "hw:9999,3");
+        assert(AlsaDevices.hardware(fallback) == "hw:9999,3");
+        fallback.set("api.alsa.path", typeof(string), "plughw:9999,3");
+        assert(AlsaDevices.hardware(fallback) == null);
+
+        // Audio assignments saved under provider identities still resolve after switching to ALSA.
+        string directory = DirUtils.make_tmp("studio-alsa-preferences-XXXXXX");
+        string path = Path.build_filename(directory, "preferences.ini");
+        var old = new Input("Old", "old-backend");
+        var camera = new Camera(new Input("Camera", "alsa-video"), old);
+        var preferences = new Preferences(path);
+        preferences.save_audio(camera);
+        source.preference_id = "alsa:card:2";
+        source.add_preference_alias("old-backend");
+        var sources = new List<Input>();
+        sources.append(source);
+        new Preferences(path).restore_audio(camera, sources);
+        assert(camera.audio == source);
+
+        // A subsequent launch can resolve the migrated choice without the old provider profile.
+        source.preference_aliases = {};
+        camera.audio = null;
+        new Preferences(path).restore_audio(camera, sources);
+        assert(camera.audio == source);
+        FileUtils.unlink(path);
+        DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
 /** Register and run the Vala unit and synthetic recording integration checks. */
 int main(string[] args)
 {
@@ -915,6 +1093,8 @@ int main(string[] args)
     Test.add_func("/studio/camera-controls", test_camera_controls);
     Test.add_func("/studio/video-modes", test_video_modes);
     Test.add_func("/studio/preferences", test_preferences);
+    Test.add_func("/studio/native-audio", test_native_audio);
+    Test.add_func("/studio/alsa-discovery", test_alsa_discovery);
     Test.add_func("/studio/layout-preferences", test_layout_preferences);
     Test.add_func("/studio/level-rms", test_level_rms);
     Test.add_func("/studio/rolling-framerate", test_rates);

@@ -34,8 +34,8 @@ Install matching runtime packages for:
 - GTK 4.12+, libadwaita 1.4+, libpanel 1.4+, GLib/GIO, GStreamer 1.24+, and
   libX11.
 - GStreamer core/base/good/bad plugins, including PipeWire, `identity`,
-  `decodebin`, `videoconvert`, `videoscale`, `audioconvert`, `audioresample`,
-  `level`, `taginject`, `h264parse`, and `matroskamux`.
+  `decodebin`, `videoconvert`, `videoscale`, `audioconvert`, `level`,
+  `taginject`, `h264parse`, and `matroskamux`.
 - The GTK 4 GStreamer sink, `gtk4paintablesink` (often packaged as
   `gst-plugin-gtk4`). GTK 3's `gtksink` is a different plugin.
 - A hardware H.264 encoder and its working driver: VA-API
@@ -43,6 +43,7 @@ Install matching runtime packages for:
   Sync (`qsvh264enc`), legacy VA-API, or V4L2.
 - A running desktop PipeWire service with access to the cameras and audio
   inputs.
+- For microphones: `alsasrc` and access to the raw ALSA capture devices.
 - For computer audio: `pulsesrc` and a PulseAudio-compatible server (normally
   `pipewire-pulse`). It captures the default output monitor, not the default
   microphone.
@@ -100,3 +101,15 @@ The main window remembers its size, maximized/fullscreen state, and the video
 controls pane width. On X11 it also restores window placement; on Wayland the
 compositor chooses placement. These settings share the preferences file with
 channel settings. Without a saved controls width, the default remains 20em.
+
+Physical microphones use ALSA `hw:` capture. Float32 is preferred when the
+hardware advertises it; otherwise capture uses a supported native PCM format.
+MKV tracks preserve that format, sample rate, and channel count without audio
+conversion or resampling. Metering has a separate conversion branch. Computer
+audio remains the default output monitor; non-ALSA virtual inputs are marked
+“sound server” and preserve the format delivered by that backend.
+
+Direct hardware capture can fail if another client, including PipeWire, holds
+the ALSA device. Release it before recording; StudioRecorder does not suspend
+other clients or silently fall back to converted capture. Native formats that
+Matroska cannot represent are reported as unsupported rather than transcoded.

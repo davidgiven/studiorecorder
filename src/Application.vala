@@ -1008,13 +1008,26 @@ public class Application : GLib.Object
         return rate.is_nan() ? "—" : "%.1f".printf(rate);
     }
 
-    /** Render target and post-encoding FPS for the selected video track. */
+    /** Render negotiated video/audio formats and post-encoding FPS for the selected source. */
     private void show_framerate(VideoTrack track)
     {
+        string size = track.width > 0 ? "%d × %d".printf(track.width, track.height) : "— × —";
+        string audio = recorder != null ? recorder.audio_summary(track.camera.audio) : "Detecting audio format…";
+
+        // Screen can record independent computer audio in addition to its assigned microphone.
+        if (recorder != null && track.camera.record_enabled && track.camera.input.identity.has_prefix("desktop-screen") &&
+            (track.camera.audio == null || track.camera.audio.identity != "desktop-audio"))
+            foreach (var input in required_audio)
+                if (input.identity == "desktop-audio")
+                    audio += "\nComputer audio: " + recorder.audio_summary(input);
+
+        // Escape all negotiated text before embedding it in the overlay's markup.
         fps_label.set_markup(
-            /* str= */ "<span background='#202020' foreground='white'>  Target: %s fps   Recording: %s fps  </span>".printf(
+            /* str= */ "<span background='#202020' foreground='white'>  %s · Target: %s fps   Recording: %s fps  \n  Audio: %s  </span>".printf(
+                /* resolution= */ size,
                 /* target_fps= */ rate_text(track.target),
-                /* recording_fps= */ rate_text(track.actual)));
+                /* recording_fps= */ rate_text(track.actual),
+                /* audio_format= */ Markup.escape_text(audio)));
     }
 
     /** Sample track statistics and refresh thumbnail summaries, the FPS overlay, and elapsed time. */

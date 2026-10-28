@@ -28,6 +28,7 @@ public class Recorder : GLib.Object
     }
     public List<VideoTrack> videos = new List<VideoTrack> ();
     public HashTable<string, string> level_sources = new HashTable<string, string> (str_hash, str_equal);
+    private HashTable<string, Gst.Pad> audio_pads = new HashTable<string, Gst.Pad>(str_hash, str_equal);
     private HashTable<string, string> labels = new HashTable<string, string> (str_hash, str_equal);
     private Gst.Element? mux;
     private List<Gst.Pad> requested_pads = new List<Gst.Pad> ();
@@ -305,33 +306,60 @@ public class Recorder : GLib.Object
         }
     }
 
-    /** Convert one unique input to 48 kHz float32 PCM without restricting its channel count. */
+    /** Capture each unique input once and mux its native PCM while metering a separate branch. */
     private void add_audio(Input input, string associated, bool record_audio) throws Error
     {
         var source = input.create_element();
         labels.insert(source.name, "Audio input '%s' [%s]".printf(input.name, input.identity));
+        pipeline.add(source);
+        if (source.set_state(Gst.State.READY) == Gst.StateChangeReturn.FAILURE)
+        {
+            var error = pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR);
+            string detail = error != null ? describe_error(error) : "No driver diagnostic was provided.";
+            throw new RecorderError.FAILED("Cannot open audio input '%s'%s: %s", input.name, input.alsa_device != null ? " (" + input.alsa_device + ")" : "", detail);
+        }
 
-        // Use the same converted audio path for metering and recording, preserving channel count.
+        // Probe the opened hardware, not template caps, before preferring supported float32 capture.
+        var supported = source.get_static_pad("src").query_caps(null);
+        var format = make("capsfilter");
+        format.set("caps", AudioFormat.capture_caps(supported));
+        var tee = make("tee");
+        chain({ format, tee });
+        audio_pads.insert(input.identity, tee.get_static_pad("sink"));
+        if (!source.link(format))
+            throw new RecorderError.FAILED("Cannot negotiate native audio for '%s'.", input.name);
+
+        // Only the meter may convert samples; it cannot constrain or modify the native recording branch.
+        var meter_queue = queue(true);
         var meter = make("level");
         meter.set("interval", (uint64) (50 * Gst.MSECOND), "post-messages", true);
-        var output_queue = queue();
-        chain(
-            /* elements= */ { source, make("audioconvert"), make("audioresample"),
-                              filter("audio/x-raw,format=F32LE,layout=interleaved,rate=48000"), meter,
-                              tags(input.name, "Audio source: %s; cameras: %s".printf(input.identity, associated)), output_queue });
+        var meter_sink = make("fakesink");
+        meter_sink.set("sync", false, "async", false);
+        chain({ meter_queue, make("audioconvert"), meter, meter_sink });
+        if (!tee.link(meter_queue))
+            throw new RecorderError.FAILED("Cannot attach native audio metering.");
         level_sources.insert(meter.name, input.identity);
 
-        // Disabled and paused audio end after metering; only selected recording inputs reach the muxer.
+        // Disabled inputs still feed meters; recorded inputs go directly to Matroska without conversion.
         if (record_audio)
-            mux_track(output_queue, "audio");
-        else
         {
-            var sink = make("fakesink");
-            sink.set("sync", false, "async", false);
-            pipeline.add(sink);
-            if (!output_queue.link(sink))
-                throw new RecorderError.FAILED("Cannot attach audio preview.");
+            var output_queue = queue();
+            var identity_tags = tags(input.name, "Audio source: %s; cameras: %s".printf(input.identity, associated));
+            chain({ output_queue, identity_tags });
+            if (!tee.link(output_queue))
+                throw new RecorderError.FAILED("Cannot attach native audio recording.");
+            mux_track(identity_tags, "audio");
         }
+    }
+
+    /** Describe negotiated capture PCM before meter conversion, including shared and monitor inputs. */
+    public string audio_summary(Input? input)
+    {
+        if (input == null)
+            return "No audio";
+        var pad = audio_pads.lookup(input.identity);
+        var caps = pad != null ? pad.get_current_caps() : null;
+        return AudioFormat.summary(caps);
     }
 
     /** Add capture-source identity and GStreamer debug details to a pipeline error. */
