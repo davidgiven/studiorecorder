@@ -174,6 +174,68 @@ public class Preferences : GLib.Object
         save();
     }
 
+    /** Read a bounded layout integer independently, retaining defaults for missing or corrupt keys. */
+    private int layout_integer(string key, int fallback, int minimum, int maximum)
+    {
+        try
+        {
+            int value = settings.get_integer("window", key);
+            return value >= minimum && value <= maximum ? value : fallback;
+        }
+        catch (KeyFileError error)
+        {
+            return fallback;
+        }
+    }
+
+    /** Read a layout flag without making unrelated saved geometry depend on its validity. */
+    private bool layout_boolean(string key)
+    {
+        try
+        {
+            return settings.get_boolean("window", key);
+        }
+        catch (KeyFileError error)
+        {
+            return false;
+        }
+    }
+
+    /** Restore window and controls geometry while keeping safe defaults for invalid settings. */
+    public WindowGeometry load_window_geometry()
+    {
+        var geometry = new WindowGeometry();
+        geometry.width = layout_integer("width", 960, 128, 32768);
+        geometry.height = layout_integer("height", 640, 128, 32768);
+        geometry.controls_width = layout_integer("controls-width", 0, 64, 8192);
+        geometry.maximized = layout_boolean("maximized");
+        geometry.fullscreen = layout_boolean("fullscreen");
+
+        // Coordinates are optional because Wayland delegates placement to the compositor.
+        geometry.x = layout_integer("x", int.MIN, -65536, 65536);
+        geometry.y = layout_integer("y", int.MIN, -65536, 65536);
+        geometry.positioned = geometry.x != int.MIN && geometry.y != int.MIN;
+        return geometry;
+    }
+
+    /** Save layout without replacing channel groups or unrelated preference keys. */
+    public void save_window_geometry(WindowGeometry geometry)
+    {
+        settings.set_integer("window", "width", geometry.width);
+        settings.set_integer("window", "height", geometry.height);
+        settings.set_integer("window", "controls-width", geometry.controls_width);
+        settings.set_boolean("window", "maximized", geometry.maximized);
+        settings.set_boolean("window", "fullscreen", geometry.fullscreen);
+
+        // Preserve existing X11 placement during Wayland sessions where coordinates are unavailable.
+        if (geometry.positioned)
+        {
+            settings.set_integer("window", "x", geometry.x);
+            settings.set_integer("window", "y", geometry.y);
+        }
+        save();
+    }
+
     /** Atomically replace the preferences file after creating its private parent directory. */
     private void save()
     {

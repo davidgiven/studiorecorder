@@ -27,9 +27,9 @@ You'll get a binary called `./studio-recorder`.
 ## Dependencies
 
 For building, install Vala (`valac`), a C compiler, Make, pkg-config, and
-development headers for GTK 4, libadwaita, libpanel, GStreamer, GLib/GIO
-(including gio-unix), Xlib, and Linux V4L2. Install matching runtime packages
-for:
+development headers for GTK 4 (including its X11 backend bindings), libadwaita,
+libpanel, GStreamer, GLib/GIO (including gio-unix), Xlib, and Linux V4L2.
+Install matching runtime packages for:
 
 - GTK 4.12+, libadwaita 1.4+, libpanel 1.4+, GLib/GIO, GStreamer 1.24+, and
   libX11.
@@ -95,3 +95,8 @@ The File menu contains About and Exit; Exit finalizes an active take before
 closing. The View menu toggles the Left, Right, Top, and Bottom panel areas.
 Recording controls and status remain in a toolbar below the menu bar even when
 panels are hidden.
+
+The main window remembers its size, maximized/fullscreen state, and the video
+controls pane width. On X11 it also restores window placement; on Wayland the
+compositor chooses placement. These settings share the preferences file with
+channel settings. Without a saved controls width, the default remains 20em.

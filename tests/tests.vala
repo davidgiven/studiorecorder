@@ -737,6 +737,67 @@ private void test_preferences()
     }
 }
 
+/** Verify independent layout defaults, exact geometry round trips, and preservation of channel settings. */
+private void test_layout_preferences()
+{
+    try
+    {
+        string directory = DirUtils.make_tmp("studio-layout-XXXXXX");
+        string path = Path.build_filename(directory, "preferences.ini");
+        var preferences = new Preferences(path);
+        var defaults = preferences.load_window_geometry();
+        assert(defaults.width == 960 && defaults.height == 640);
+        assert(defaults.controls_width == 0 && !defaults.positioned);
+
+        // Layout and channel settings share a file without overwriting each other.
+        var camera = new Camera(new Input("Camera", "layout-camera"));
+        camera.record_enabled = false;
+        preferences.save_record_enabled(camera);
+        var layout = new WindowGeometry();
+        layout.width = 1200;
+        layout.height = 800;
+        layout.controls_width = 280;
+        layout.x = 140;
+        layout.y = 80;
+        layout.positioned = true;
+        layout.maximized = true;
+        layout.fullscreen = true;
+        preferences.save_window_geometry(layout);
+        preferences.save_record_enabled(camera);
+        var restored = new Preferences(path).load_window_geometry();
+        assert(restored.width == 1200 && restored.height == 800);
+        assert(restored.controls_width == 280);
+        assert(restored.positioned && restored.x == 140 && restored.y == 80);
+        assert(restored.maximized && restored.fullscreen);
+        camera.record_enabled = true;
+        new Preferences(path).restore_record_enabled(camera);
+        assert(!camera.record_enabled);
+
+        // A session without position access preserves previously saved X11 coordinates.
+        layout.positioned = false;
+        preferences.save_window_geometry(layout);
+        restored = new Preferences(path).load_window_geometry();
+        assert(restored.positioned && restored.x == 140 && restored.y == 80);
+
+        // Invalid dimensions and incomplete coordinates fall back independently to safe defaults.
+        var contents = new KeyFile();
+        contents.load_from_file(path, KeyFileFlags.NONE);
+        contents.set_integer("window", "width", -1);
+        contents.set_integer("window", "controls-width", int.MAX);
+        contents.remove_key("window", "y");
+        contents.save_to_file(path);
+        restored = new Preferences(path).load_window_geometry();
+        assert(restored.width == 960 && restored.height == 800);
+        assert(restored.controls_width == 0 && !restored.positioned);
+        FileUtils.unlink(path);
+        DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
 /** Validate real-metadata slider mapping and restore ordering against a simulated V4L2 driver. */
 private void test_camera_controls()
 {
@@ -854,6 +915,7 @@ int main(string[] args)
     Test.add_func("/studio/camera-controls", test_camera_controls);
     Test.add_func("/studio/video-modes", test_video_modes);
     Test.add_func("/studio/preferences", test_preferences);
+    Test.add_func("/studio/layout-preferences", test_layout_preferences);
     Test.add_func("/studio/level-rms", test_level_rms);
     Test.add_func("/studio/rolling-framerate", test_rates);
     Test.add_func("/studio/primary-monitor", test_geometry);

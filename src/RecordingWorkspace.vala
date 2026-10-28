@@ -19,7 +19,15 @@ public class RecordingWorkspace : Gtk.Box
                 <property name="hexpand">true</property>
                 <property name="reveal-bottom">true</property>
                 <child>
-                  <object class="PanelGrid" id="grid"/>
+                  <object class="GtkPaned" id="preview_split">
+                    <property name="orientation">horizontal</property>
+                    <property name="resize-start-child">true</property>
+                    <property name="resize-end-child">false</property>
+                    <property name="shrink-start-child">true</property>
+                    <property name="shrink-end-child">true</property>
+                    <child><object class="PanelGrid" id="grid"/></child>
+                    <child><object class="PanelGrid" id="controls_grid"/></child>
+                  </object>
                 </child>
                 <child type="bottom">
                   <object class="PanelPaned">
@@ -34,25 +42,17 @@ public class RecordingWorkspace : Gtk.Box
         dock = (Panel.Dock) builder.get_object("dock");
         var grid = (Panel.Grid) builder.get_object("grid");
         grid.create_frame.connect(() => create_frame());
+        var controls_grid = (Panel.Grid) builder.get_object("controls_grid");
+        controls_grid.create_frame.connect(() => create_frame());
         dock.create_frame.connect((position) => create_frame());
 
         // Stable panel IDs identify the UI roles; media state stays owned by Application.
         var main_preview = create_panel("main-preview", "Main preview", "camera-video-symbolic", preview);
         grid.add(main_preview);
         add_to_frame((Panel.Frame) builder.get_object("thumbnails"), create_panel("thumbnails", "Sources", "view-grid-symbolic", thumbnails));
-        // Keep the controls split inside the preview area, above the full-width bottom panels.
-        grid.insert_column(1);
-        var controls_column = grid.get_column(1);
-        controls_column.hexpand = false;
-        controls_column.get_parent().hexpand = false;
-        add_to_frame(
-            /* frame= */ controls_column.get_row(0),
-            /* panel= */ create_panel(
-                /* id= */ "video-controls",
-                /* title= */ "Video controls",
-                /* icon_name= */ "preferences-system-symbolic",
-                /* child= */ controls));
-        initialize_controls_width(controls_column, controls);
+        // A public GTK divider preserves the controls width independently of capture dimensions.
+        controls_grid.add(create_panel("video-controls", "Video controls", "preferences-system-symbolic", controls));
+        initialize_controls_width((Gtk.Paned) builder.get_object("preview_split"), controls_grid, controls);
 
         // Expose checked menu actions so hidden docking areas remain reachable above the workspace.
         add_area_toggle("Left panels", "left", "reveal-start");
@@ -62,27 +62,48 @@ public class RecordingWorkspace : Gtk.Box
         append(dock);
     }
 
-    /** Retain the default controls width until the native divider records an explicit resize. */
-    private static void initialize_controls_width(Panel.GridColumn column, Gtk.Widget controls)
+    /** Restore the end-pane width and preserve it independently of changes to the window allocation. */
+    private static void initialize_controls_width(Gtk.Paned split, Panel.Grid column, Gtk.Widget controls)
     {
-        var divider = column.get_parent();
-        if (divider == null || divider.get_class().find_property("drag-position") == null)
-            return;
         var controls_reference = WeakRef(controls);
-        var divider_reference = WeakRef(divider);
-
-        // The native position is read-only and changes when the user drags the column divider.
-        divider.notify["drag-position"].connect(
+        var split_reference = WeakRef(split);
+        int allocated_width = 0;
+        int end_width = 0;
+        int handle_width = 0;
+        split.notify["position"].connect(
             /* handler= */ () =>
             {
-                var native_divider = divider_reference.get();
                 var view = controls_reference.get() as VideoControlsView;
-                if (native_divider == null || view == null)
-                    return;
-                int position;
-                native_divider.get("drag-position", out position);
-                if (position >= 0)
+                var paned = split_reference.get() as Gtk.Paned;
+                if (view != null)
                     view.allow_manual_width();
+                if (paned != null && allocated_width > 0 && paned.get_width() == allocated_width)
+                    end_width = int.max(0, allocated_width - paned.position - handle_width);
+            });
+
+        // Native position is measured from the start; translate window resizes into a stable end width.
+        var column_reference = WeakRef(column);
+        split.add_tick_callback(
+            /* callback= */ (widget, clock) =>
+            {
+                var paned = (Gtk.Paned) widget;
+                var grid = column_reference.get() as Panel.Grid;
+                if (grid == null)
+                    return Source.REMOVE;
+                int width = paned.get_width();
+                if (width <= 0 || width == allocated_width)
+                    return Source.CONTINUE;
+                handle_width = int.max(0, width - paned.start_child.get_width() - paned.end_child.get_width());
+                if (allocated_width == 0)
+                {
+                    int minimum;
+                    grid.measure(Gtk.Orientation.HORIZONTAL, -1, out minimum, out end_width, null, null);
+                }
+
+                // Record the allocation before changing position so its notification sees consistent bounds.
+                allocated_width = width;
+                paned.position = int.max(0, width - end_width - handle_width);
+                return Source.CONTINUE;
             });
     }
 

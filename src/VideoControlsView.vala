@@ -3,10 +3,12 @@ public class VideoControlsView : Gtk.Widget
 {
     private Gtk.ScrolledWindow scroll;
     private bool manually_resized;
+    private int saved_width;
 
     /** Scroll camera adjustments vertically while allowing the dock divider to set their width. */
-    public VideoControlsView(Gtk.Widget controls)
+    public VideoControlsView(Gtk.Widget controls, int saved_width = 0)
     {
+        this.saved_width = saved_width;
         vexpand = true;
         hexpand = false;
         scroll = new Gtk.ScrolledWindow()
@@ -37,13 +39,13 @@ public class VideoControlsView : Gtk.Widget
             size *= resolution / 72;
 
         // Protect the startup width until an explicit divider position takes over.
-        natural = (int) Math.ceil(20 * size);
+        natural = saved_width > 0 ? saved_width : (int) Math.ceil(20 * size);
         minimum = manually_resized ? int.min(180, natural) : natural;
         minimum_baseline = -1;
         natural_baseline = -1;
     }
 
-    /** Release the startup minimum after the dock records an explicit user divider position. */
+    /** Release the startup minimum once the divider has an explicit restored or user-selected position. */
     public void allow_manual_width()
     {
         if (manually_resized)

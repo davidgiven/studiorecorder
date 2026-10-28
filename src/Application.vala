@@ -56,6 +56,8 @@ public class Application : GLib.Object
     private MainLoop loop = new MainLoop();
     private Registry registry = new Registry();
     private Preferences? preferences;
+    private WindowGeometry geometry = new WindowGeometry();
+    private VideoControlsView? controls_view;
     private DesktopCapture? desktop;
     private Recorder? recorder;
     private List<Camera> cameras = new List<Camera> ();
@@ -105,14 +107,17 @@ public class Application : GLib.Object
         }
     }
 
-    /** Initialize transport options and create the desktop window unless running headless tests. */
-    public Application (bool synthetic = false, bool headless = false, double duration = 0) throws Error
+    /** Initialize transport and preferences, allowing explicit isolated settings for synthetic tests. */
+    public Application (bool synthetic = false, bool headless = false, double duration = 0, Preferences? stored_preferences = null) throws Error
     {
         this.synthetic = synthetic;
         this.headless = headless;
         this.duration = duration;
-        if (!synthetic)
+        preferences = stored_preferences;
+        if (preferences == null && !synthetic)
             preferences = new Preferences();
+        if (preferences != null)
+            geometry = preferences.load_window_geometry();
         if (!headless)
             create_window();
     }
@@ -126,7 +131,29 @@ public class Application : GLib.Object
         Panel.init();
         window = new Gtk.Window();
         window.title = "StudioRecorder — Vala";
-        window.set_default_size(960, 640);
+        geometry.restore(window);
+        var initial_placement = new WindowGeometry();
+        initial_placement.positioned = geometry.positioned;
+        initial_placement.x = geometry.x;
+        initial_placement.y = geometry.y;
+        bool placement_restored = false;
+        window.map.connect(
+            /* handler= */ () =>
+            {
+                if (placement_restored)
+                    return;
+                placement_restored = true;
+
+                // Restore after the initial GTK resize and window-manager placement transactions.
+                Timeout.add(
+                    /* interval= */ 100,
+                    /* function= */ () =>
+                    {
+                        if (!exiting)
+                            initial_placement.restore_position(window);
+                        return Source.REMOVE;
+                    });
+            });
         window.close_request.connect(
             /* handler= */ () =>
             {
@@ -254,7 +281,8 @@ public class Application : GLib.Object
             margin_bottom = 16
         };
         // Keep the preferred width stable across sources while preserving the dock's manual divider.
-        return new VideoControlsView(preview_controls);
+        controls_view = new VideoControlsView(preview_controls, geometry.controls_width);
+        return controls_view;
     }
 
     /** Write progress to the terminal and mirror it in the window when one is present. */
@@ -960,6 +988,7 @@ public class Application : GLib.Object
             return;
 
         // Use one monotonic timestamp for every track in this UI refresh.
+        geometry.sample(window, controls_view);
         uint64 now = Gst.Util.get_timestamp();
         bool restore_capture = false;
         foreach (var item in items)
@@ -1220,8 +1249,15 @@ public class Application : GLib.Object
             registry.stop();
         if (desktop != null)
             desktop.close();
+
+        // Capture final normal bounds and divider width before GTK destroys their native surfaces.
         if (window != null)
+        {
+            geometry.sample(window, controls_view);
+            if (preferences != null)
+                preferences.save_window_geometry(geometry);
             window.destroy();
+        }
         items = new List<Thumbnail> ();
         set_state(TransportState.CLOSED);
         loop.quit();

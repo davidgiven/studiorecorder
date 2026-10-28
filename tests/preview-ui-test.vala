@@ -225,6 +225,102 @@ private void test_preview_rebuild()
     }
 }
 
+/** Restore actual window bounds and a manually resized controls pane across two application launches. */
+private void test_layout_restart()
+{
+    try
+    {
+        string directory = DirUtils.make_tmp("studio-layout-ui-XXXXXX");
+        string path = Path.build_filename(directory, "preferences.ini");
+        var initial = new WindowGeometry();
+        initial.width = 1100;
+        initial.height = 800;
+        initial.controls_width = 320;
+        new Preferences(path).save_window_geometry(initial);
+
+        // Use only an explicit temporary preferences file even though media sources are synthetic.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            var app = new Application(true, false, 0, new Preferences(path));
+            var window = (Gtk.Window) Gtk.Window.get_toplevels().get_item(0);
+            int ticks = 0;
+            int stage = 0;
+            Timeout.add(
+                /* interval= */ 100,
+                /* function= */ () =>
+                {
+                    assert(++ticks < 150);
+                    if (app.transport_state != TransportState.PAUSED || ticks < 10)
+                        return Source.CONTINUE;
+                    var controls = (VideoControlsView) find_widget(window, typeof(VideoControlsView));
+                    if (pass == 0 && stage == 0)
+                    {
+                        assert(window.get_width() == 1100 && window.get_height() == 800);
+                        assert(controls.get_width() == 320);
+
+                        // Drive the real divider, then resize the window without changing the end-pane width.
+                        var split = (Gtk.Paned) find_widget(window, typeof(Gtk.Paned));
+                        split.position += 40;
+                        stage = 1;
+                        return Source.CONTINUE;
+                    }
+                    if (pass == 0 && stage == 1)
+                    {
+                        if (ticks < 13)
+                            return Source.CONTINUE;
+                        assert(controls.get_width() == 280);
+
+                        // Resize after the drag has been allocated, as separate user interactions are.
+                        window.set_default_size(1200, 820);
+                        stage = 2;
+                        return Source.CONTINUE;
+                    }
+                    if (pass == 0 && stage == 2)
+                    {
+                        if (ticks < 17)
+                            return Source.CONTINUE;
+
+                        // Move after GTK's resize transaction has settled, using exact client coordinates.
+                        var placement = new WindowGeometry();
+                        placement.positioned = true;
+                        placement.x = 120;
+                        placement.y = 100;
+                        placement.restore_position(window);
+                        stage = 3;
+                        return Source.CONTINUE;
+                    }
+                    if (pass == 0 && ticks < 22)
+                        return Source.CONTINUE;
+
+                    // Both the live allocation and the next launch must match the saved manual sizes.
+                    assert(window.get_width() == 1200 && window.get_height() == 820);
+                    Test.message("pass=%d window=%dx%d controls=%d", pass, window.get_width(), window.get_height(), controls.get_width());
+                    assert(controls.get_width() == 280);
+                    var observed = new WindowGeometry();
+                    observed.sample(window, controls);
+                    if (window.get_surface() is Gdk.X11.Surface)
+                    {
+                        Test.message("position valid=%s actual=%d,%d", observed.positioned.to_string(), observed.x, observed.y);
+                        assert(observed.positioned && observed.x == 120 && observed.y == 100);
+                    }
+                    app.request_exit();
+                    return Source.REMOVE;
+                });
+            assert(app.run() == 0);
+            var saved = new Preferences(path).load_window_geometry();
+            assert(saved.width == 1200 && saved.height == 820 && saved.controls_width == 280);
+        }
+
+        // The restart test never writes user preferences or creates recordings.
+        FileUtils.unlink(path);
+        DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
 /** Run the rebuild regression with native synthetic media and a real GTK display. */
 int main(string[] args)
 {
@@ -234,5 +330,6 @@ int main(string[] args)
     Native.xinit_threads();
     Gst.init(ref args);
     Test.add_func("/studio/preview-rebuild", test_preview_rebuild);
+    Test.add_func("/studio/layout-restart", test_layout_restart);
     return Test.run();
 }

@@ -12,7 +12,7 @@ The large preview displays the selected source. Clicking a thumbnail changes onl
 
 A default-on Record channel toggle below each thumbnail controls whether its video and selected audio appear in subsequent takes. Toggles are editable only while paused, preserve their values across rebuilds, and do not interrupt preview when changed. Their `record-enabled` preference is saved in each stable video-source group and restored before the initial preview is built. Missing or malformed values retain the default-on setting; an all-off saved configuration keeps Play disabled until a channel is enabled. X11 and Wayland Screen share the same saved inclusion choice. A large red X marks excluded thumbnails using a click-through drawing overlay bound to the channel's inclusion state. Disabled channels retain live previews and meters, including during other channels' takes, but have no encoder/frame counter or muxed video track. Their audio is recorded only if an enabled channel also selects it. Screen's toggle additionally controls the independent computer-audio track. With every channel off, Play is disabled and no empty take can be created.
 
-The window has a traditional File/View menu bar and a permanent recording/status toolbar beneath it. File contains About and Exit; Exit uses the same take-finalizing shutdown path as window close. View contains checked Left, Right, Top, and Bottom panel-area actions backed directly by the dock's visibility properties, so docking changes keep menu state synchronized. Below the toolbar, a libpanel `PanelDock` has three movable `PanelWidget`s: Main preview and Video controls in adjacent center-grid columns separated by a vertical divider, with Sources in a full-width bottom frame. The controls divide only the preview area rather than occupying the window’s right docking area. Frames use libpanel's icon-and-text title bars and native resize dividers. The native drag source is moved from the header's separate grip button onto the entire header, keeping libpanel's docking callbacks while making the title bar draggable. The unused grip is hidden. The menu bar and toolbar remain outside the dock and accessible when panel areas are hidden. Docking layout is not saved across launches. Capture pipeline rebuilds update panel contents without rebuilding the dock.
+The window has a traditional File/View menu bar and a permanent recording/status toolbar beneath it. File contains About and Exit; Exit uses the same take-finalizing shutdown path as window close. View contains checked Left, Right, Top, and Bottom panel-area actions backed directly by the dock's visibility properties, so docking changes keep menu state synchronized. Below the toolbar, a libpanel `PanelDock` has three movable `PanelWidget`s: Main preview and Video controls in separate center grids divided by a horizontal GtkPaned, with Sources in a full-width bottom frame. The controls divide only the preview area rather than occupying the window’s right docking area. Frames use libpanel's icon-and-text title bars and native resize dividers. The native drag source is moved from the header's separate grip button onto the entire header, keeping libpanel's docking callbacks while making the title bar draggable. The unused grip is hidden. The menu bar and toolbar remain outside the dock and accessible when panel areas are hidden. Panel arrangement is not saved across launches; controls-pane width and main-window geometry are saved. Capture pipeline rebuilds update panel contents without rebuilding the dock.
 
 Selecting a camera probes its V4L2 device for integer, boolean, menu, and integer-menu controls. The panel uses driver names, ranges, step sizes, current values, and defaults, with a reset-to-default button to the right of each horizontal slider. Sparse menus are mapped to supported entries and display their labels. Read-only, inactive, and grabbed controls are shown disabled; mode changes refresh dependent controls. The panel scrolls vertically, and scale wheel handlers are disabled so wheel input scrolls the panel. Screen, synthetic inputs, and sources without V4L2 paths show an explanatory message.
 
@@ -209,12 +209,38 @@ video in that viewport, while the meter and exclusion X share its bounds.
 Source names, format summaries, and selected audio names ellipsize on a single
 line; full source and audio names remain available as tooltips.
 
-`VideoControlsView` gives the camera-control scroller a stable natural width of
-20em, calculated from the GTK font and Pango resolution. The initial minimum is also 20em so the dock cannot shrink the panel when
-capture begins. The controls column observes its native divider's read-only
-`drag-position`: after an explicit position is recorded by a user drag, the
-startup minimum is released and the dock retains the user's size. Setting only
-the natural width is insufficient because the dock can allocate less than that
-when preview dimensions arrive. Vertical measurement and scrolling remain
-native GTK behavior. The display-dependent regression checks actual
-post-startup width against the 20em preferred width.
+`VideoControlsView` gives the camera-control scroller a stable default width of
+20em, calculated from the GTK font and Pango resolution, or its saved width in
+logical pixels. A public `GtkPaned` separates the preview and controls grids.
+Before the first rendered allocation it restores the end-pane width, accounting
+for frame decoration and the handle. Position changes update the desired end
+width; allocation changes translate that width back into a start-relative
+position. This keeps window resizing and camera-format changes from resizing
+the controls pane, while allowing manual divider adjustments. Native GTK still
+handles vertical scrolling and widget rendering.
+
+`WindowGeometry` tracks normal window size, maximized/fullscreen state, controls
+width, and optional X11 client coordinates. The shared preferences file stores
+these keys in the `window` group. Startup loads validated values before showing
+the window; graceful shutdown samples final bounds and saves them without
+changing channel groups. Maximized and fullscreen allocations do not overwrite
+the last normal window dimensions. Hidden controls retain their last sampled
+width. Synthetic runs use no user preferences; GUI restart tests explicitly
+inject a temporary preferences file.
+
+X11 placement uses the native GDK X11 surface and Xlib bindings, requesting
+client coordinates with StaticGravity through
+[EWMH _NET_MOVERESIZE_WINDOW](https://specifications.freedesktop.org/wm/latest/ar01s04.html).
+Restoration runs after the initial GTK resize transaction and only on the first
+map. Coordinates outside the current X11 screen are left to the window manager.
+Wayland retains size, display state, and controls width, but its compositor owns
+window placement; X11 coordinates are preserved without being applied there.
+The X11 backend bindings are deprecated in newer GTK releases but are used only
+when the active native surface is X11.
+
+The display-dependent restart regression changes the real divider, resizes and
+moves a synthetic application's window, closes it, and launches it again. It
+checks actual restored controls width, window size, and X11 coordinates across
+both launches. Preference checks cover defaults, malformed geometry, display
+state, and preservation of channel settings. Wayland compositor placement is
+not asserted by these checks.
