@@ -208,3 +208,13 @@ source resolution or aspect ratio cannot resize the strip. GTK contains the
 video in that viewport, while the meter and exclusion X share its bounds.
 Source names, format summaries, and selected audio names ellipsize on a single
 line; full source and audio names remain available as tooltips.
+
+`VideoControlsView` gives the camera-control scroller a stable natural width of
+20em, calculated from the GTK font and Pango resolution. The initial minimum is also 20em so the dock cannot shrink the panel when
+capture begins. The controls column observes its native divider's read-only
+`drag-position`: after an explicit position is recorded by a user drag, the
+startup minimum is released and the dock retains the user's size. Setting only
+the natural width is insufficient because the dock can allocate less than that
+when preview dimensions arrive. Vertical measurement and scrolling remain
+native GTK behavior. The display-dependent regression checks actual
+post-startup width against the 20em preferred width.

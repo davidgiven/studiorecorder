@@ -253,14 +253,8 @@ public class Application : GLib.Object
             margin_end = 16,
             margin_bottom = 16
         };
-        var scroll = new Gtk.ScrolledWindow()
-        {
-            vexpand = true,
-            child = preview_controls
-        };
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC);
-        scroll.min_content_width = 180;
-        return scroll;
+        // Keep the preferred width stable across sources while preserving the dock's manual divider.
+        return new VideoControlsView(preview_controls);
     }
 
     /** Write progress to the terminal and mirror it in the window when one is present. */

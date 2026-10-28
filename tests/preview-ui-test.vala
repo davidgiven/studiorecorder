@@ -73,6 +73,8 @@ private void test_preview_rebuild()
         Gtk.DropDown? resolution = null;
         Gtk.DropDown? rate = null;
         Gtk.Picture? preview = null;
+        VideoControlsView? controls_view = null;
+        int controls_width = 0;
         int phase = 0;
         int ticks = 0;
 
@@ -115,6 +117,11 @@ private void test_preview_rebuild()
                     assert(found_about);
 
                     // Choose a non-first source before changing its format through the actual widgets.
+                    controls_view = (VideoControlsView) find_widget(window, typeof(VideoControlsView));
+                    controls_width = controls_view.get_width();
+                    int minimum_width, natural_width;
+                    controls_view.measure(Gtk.Orientation.HORIZONTAL, -1, out minimum_width, out natural_width, null, null);
+                    assert(controls_width >= natural_width);
                     screen = find_source(window, "Screen");
                     assert(screen != null);
                     screen.clicked();
@@ -139,6 +146,9 @@ private void test_preview_rebuild()
                 assert(preview.paintable != null && preview.paintable.get_intrinsic_width() > 0);
                 if (app.transport_state != TransportState.PAUSED && app.transport_state != TransportState.RECORDING)
                     return Source.CONTINUE;
+
+                // Changing source and format must not move the default, untouched controls divider.
+                assert(controls_view.get_width() == controls_width);
 
                 // The same controls and thumbnail survive every replacement graph.
                 assert(find_widget(window, typeof(CameraControlsPanel)) == panel);

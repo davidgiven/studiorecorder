@@ -42,13 +42,17 @@ public class RecordingWorkspace : Gtk.Box
         add_to_frame((Panel.Frame) builder.get_object("thumbnails"), create_panel("thumbnails", "Sources", "view-grid-symbolic", thumbnails));
         // Keep the controls split inside the preview area, above the full-width bottom panels.
         grid.insert_column(1);
+        var controls_column = grid.get_column(1);
+        controls_column.hexpand = false;
+        controls_column.get_parent().hexpand = false;
         add_to_frame(
-            /* frame= */ grid.get_column(1).get_row(0),
+            /* frame= */ controls_column.get_row(0),
             /* panel= */ create_panel(
                 /* id= */ "video-controls",
                 /* title= */ "Video controls",
                 /* icon_name= */ "preferences-system-symbolic",
                 /* child= */ controls));
+        initialize_controls_width(controls_column, controls);
 
         // Expose checked menu actions so hidden docking areas remain reachable above the workspace.
         add_area_toggle("Left panels", "left", "reveal-start");
@@ -56,6 +60,30 @@ public class RecordingWorkspace : Gtk.Box
         add_area_toggle("Top panels", "top", "reveal-top");
         add_area_toggle("Bottom panels", "bottom", "reveal-bottom");
         append(dock);
+    }
+
+    /** Retain the default controls width until the native divider records an explicit resize. */
+    private static void initialize_controls_width(Panel.GridColumn column, Gtk.Widget controls)
+    {
+        var divider = column.get_parent();
+        if (divider == null || divider.get_class().find_property("drag-position") == null)
+            return;
+        var controls_reference = WeakRef(controls);
+        var divider_reference = WeakRef(divider);
+
+        // The native position is read-only and changes when the user drags the column divider.
+        divider.notify["drag-position"].connect(
+            /* handler= */ () =>
+            {
+                var native_divider = divider_reference.get();
+                var view = controls_reference.get() as VideoControlsView;
+                if (native_divider == null || view == null)
+                    return;
+                int position;
+                native_divider.get("drag-position", out position);
+                if (position >= 0)
+                    view.allow_manual_width();
+            });
     }
 
     /** Create an icon-and-title draggable frame for initial panels and future drag-created destinations. */
