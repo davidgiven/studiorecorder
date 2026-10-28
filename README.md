@@ -122,3 +122,11 @@ retains GStreamer elements, links, states, properties, and negotiated caps for
 Graphviz viewers. Export works during preview or recording and does not rebuild
 the capture pipeline. If Graphviz is unavailable, the DOT snapshot is still
 saved and the toolbar reports the missing renderer.
+
+Recordings use streaming Matroska: no final duration or seek index is required
+to read media already written. Stop still drains queued media and closes the
+file before publishing its `.mkv` name. A crash leaves `.mkv.partial`; buffered
+media near the end may be lost. Remux with
+`ffmpeg -i TAKE.mkv.partial -map 0 -c copy recovered.mkv` to rebuild an indexed
+file without re-encoding. Streaming files may have unknown duration or limited
+seeking until remuxed.

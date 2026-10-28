@@ -2,6 +2,7 @@
 public class RecordingWorkspace : Gtk.Box
 {
     private Panel.Dock dock;
+    private Panel.Widget main_preview;
     public Menu view_menu = new Menu();
     public SimpleActionGroup view_actions = new SimpleActionGroup();
 
@@ -47,7 +48,7 @@ public class RecordingWorkspace : Gtk.Box
         dock.create_frame.connect((position) => create_frame());
 
         // Stable panel IDs identify the UI roles; media state stays owned by Application.
-        var main_preview = create_panel("main-preview", "Main preview", "camera-video-symbolic", preview);
+        main_preview = create_panel("main-preview", "Main preview", "camera-video-symbolic", preview);
         grid.add(main_preview);
         add_to_frame((Panel.Frame) builder.get_object("thumbnails"), create_panel("thumbnails", "Sources", "view-grid-symbolic", thumbnails));
         // A public GTK divider preserves the controls width independently of capture dimensions.
@@ -60,6 +61,12 @@ public class RecordingWorkspace : Gtk.Box
         add_area_toggle("Top panels", "top", "reveal-top");
         add_area_toggle("Bottom panels", "bottom", "reveal-bottom");
         append(dock);
+    }
+
+    /** Update the selected source statistics in the preview panel's native title bar. */
+    public void set_preview_summary(string summary)
+    {
+        main_preview.title = "Main preview - " + summary;
     }
 
     /** Restore the end-pane width and preserve it independently of changes to the window allocation. */

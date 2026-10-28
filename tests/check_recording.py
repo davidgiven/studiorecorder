@@ -68,12 +68,77 @@ class ValaRecordingTests(unittest.TestCase):
             self.assertTrue(stream["tags"].get("COMMENTS"))
         self.assertTrue(any("Computer" in s["tags"]["TITLE"] for s in audios))
         self.assertTrue(any("Screen" in s["tags"]["TITLE"] for s in videos))
-        self.assertGreater(float(info["format"]["duration"]), 0)
-        self.assertLess(float(info["format"]["duration"]), 5)
+        # Streaming MKV intentionally omits a final duration; measure the actual packet span instead.
+        packets = json.loads(subprocess.check_output([
+            "ffprobe", "-v", "error", "-show_packets", "-show_entries",
+            "packet=pts_time,duration_time", "-of", "json", str(files[0])]))["packets"]
+        starts = [float(p["pts_time"]) for p in packets if "pts_time" in p]
+        ends = [float(p["pts_time"]) + float(p.get("duration_time", 0))
+                for p in packets if "pts_time" in p]
+        self.assertGreater(max(ends) - min(starts), 0)
+        self.assertLess(max(ends) - min(starts), 5)
+        self.verify_streaming_header(files[0])
         decoded = subprocess.run([
             "ffmpeg", "-v", "error", "-xerror", "-i", str(files[0]), "-map", "0", "-f", "null", "-"],
             capture_output=True, timeout=20)
         self.assertEqual(decoded.returncode, 0, decoded.stderr.decode())
+
+    def verify_streaming_header(self, path):
+        """Read EBML structure to verify an open-ended Segment and absence of finalization-only headers."""
+        data = path.read_bytes()
+
+        # EBML IDs preserve their length marker; sizes remove it and reserve all-one bits for unknown size.
+        def element(offset):
+            id_length = 9 - data[offset].bit_length()
+            identifier = int.from_bytes(data[offset:offset + id_length], "big")
+            offset += id_length
+            size_length = 9 - data[offset].bit_length()
+            size = int.from_bytes(data[offset:offset + size_length], "big") & ((1 << (7 * size_length)) - 1)
+            unknown = size == (1 << (7 * size_length)) - 1
+            return identifier, None if unknown else size, offset + size_length
+
+        identifier, size, body = element(0)
+        self.assertEqual(identifier, 0x1A45DFA3)
+        identifier, size, body = element(body + size)
+        self.assertEqual(identifier, 0x18538067)
+        self.assertIsNone(size)
+
+        # Inspect segment headers up to the first media cluster, skipping payload bytes structurally.
+        while body < len(data):
+            identifier, size, payload = element(body)
+            if identifier == 0x1F43B675:
+                return
+            self.assertNotIn(identifier, (0x114D9B74, 0x1C53BB6B))
+            self.assertIsNotNone(size)
+            if identifier == 0x1549A966:
+                child = payload
+                while child < payload + size:
+                    child_id, child_size, child_body = element(child)
+                    self.assertNotEqual(child_id, 0x4489)
+                    self.assertIsNotNone(child_size)
+                    child = child_body + child_size
+            body = payload + size
+        self.fail("Streaming file has no media cluster")
+
+    def test_crash_preserves_streaming_take(self):
+        process = self.launch("--duration", "60")
+        self.wait_for(process, b"\nRecording:")
+        time.sleep(1)
+        process.kill()
+        process.communicate(timeout=10)
+        partials = list(self.directory.glob("*.mkv.partial"))
+        self.assertEqual(len(partials), 1)
+        self.verify_streaming_header(partials[0])
+
+        # Stream-copy all tracks from the abruptly terminated take, then verify that every track decodes.
+        recovered = self.directory / "recovered.mkv"
+        subprocess.run(["ffmpeg", "-v", "error", "-i", str(partials[0]), "-map", "0",
+                        "-c", "copy", str(recovered)], check=True, capture_output=True, timeout=20)
+        info = json.loads(subprocess.check_output([
+            "ffprobe", "-v", "error", "-show_streams", "-of", "json", str(recovered)]))
+        self.assertEqual(len(info["streams"]), 5)
+        subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", str(recovered), "-map", "0",
+                        "-f", "null", "-"], check=True, capture_output=True, timeout=20)
 
     def test_timed_take(self):
         self.verify(self.launch("--duration", "1"))

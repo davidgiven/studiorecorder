@@ -80,7 +80,7 @@ public class Application : GLib.Object
     private string? selected_identity;
     private Gtk.Window? window;
     private Gtk.Picture picture;
-    private Gtk.Label fps_label;
+    private RecordingWorkspace workspace;
     private Gtk.Label transport_label;
     private Gtk.Stack transport_status;
     private SimpleAction? export_graph_action;
@@ -132,6 +132,9 @@ public class Application : GLib.Object
             throw new RecorderError.FAILED("Cannot open GTK display. Run from a desktop session.");
         Adw.init();
         Panel.init();
+
+        // Apply the dark theme before creating any application widgets.
+        Adw.StyleManager.get_default().color_scheme = Adw.ColorScheme.FORCE_DARK;
         window = new Gtk.Window();
         window.title = "StudioRecorder — Vala";
         geometry.restore(window);
@@ -169,17 +172,6 @@ public class Application : GLib.Object
         {
             hexpand = true, vexpand = true, can_shrink = true
         };
-        var overlay = new Gtk.Overlay()
-        {
-            hexpand = true, vexpand = true
-        };
-        overlay.child = picture;
-        fps_label = new Gtk.Label(null)
-        {
-            halign = Gtk.Align.START, valign = Gtk.Align.START,
-            margin_start = 8, margin_top = 8, can_target = false
-        };
-        overlay.add_overlay(fps_label);
         var controls = create_preview_controls();
 
         // Keep take controls and status in a permanent toolbar beneath the menu bar.
@@ -206,8 +198,16 @@ public class Application : GLib.Object
         // Measure every status at its actual rendered font size, including a long elapsed-time sample.
         transport.append(create_transport_status());
 
+        // Pad channel controls inside the scroller so buttons stay clear of panel edges.
+        thumbnails = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8)
+        {
+            margin_start = 12,
+            margin_end = 12,
+            margin_top = 12,
+            margin_bottom = 12
+        };
+
         // Keep wide collections scrollable while leaving transport and status visible.
-        thumbnails = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
         var scroll = new Gtk.ScrolledWindow();
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER);
         scroll.child = thumbnails;
@@ -223,7 +223,7 @@ public class Application : GLib.Object
         transport.append(status_label);
 
         // Menus and transport stay outside the dock so panel visibility never hides them.
-        var workspace = new RecordingWorkspace(overlay, scroll, controls);
+        workspace = new RecordingWorkspace(picture, scroll, controls);
         var layout = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
         layout.append(create_menu_bar(workspace));
         layout.append(transport);
@@ -1051,25 +1051,19 @@ public class Application : GLib.Object
     private void show_framerate(VideoTrack track)
     {
         string size = track.width > 0 ? "%d × %d".printf(track.width, track.height) : "— × —";
-        string audio = recorder != null ? recorder.audio_summary(track.camera.audio) : "Detecting audio format…";
+        string audio = recorder != null ? recorder.audio_summary(track.camera.audio, true) : "Detecting audio format…";
 
-        // Screen can record independent computer audio in addition to its assigned microphone.
-        if (recorder != null && track.camera.record_enabled && track.camera.input.identity.has_prefix("desktop-screen") &&
-            (track.camera.audio == null || track.camera.audio.identity != "desktop-audio"))
-            foreach (var input in required_audio)
-                if (input.identity == "desktop-audio")
-                    audio += "\nComputer audio: " + recorder.audio_summary(input);
-
-        // Escape all negotiated text before embedding it in the overlay's markup.
-        fps_label.set_markup(
-            /* str= */ "<span background='#202020' foreground='white'>  %s · Target: %s fps   Recording: %s fps  \n  Audio: %s  </span>".printf(
+        // Keep negotiated media details in the draggable preview title rather than over its image.
+        string text =
+            "%s · %s".printf(
                 /* resolution= */ size,
-                /* target_fps= */ rate_text(track.target),
-                /* recording_fps= */ rate_text(track.actual),
-                /* audio_format= */ Markup.escape_text(audio)));
+                /* audio_format= */ audio);
+        if (!track.actual.is_nan())
+            text += " · %.1f fps".printf(track.actual);
+        workspace.set_preview_summary(text);
     }
 
-    /** Sample track statistics and refresh thumbnail summaries, the FPS overlay, and elapsed time. */
+    /** Sample track statistics and refresh thumbnail summaries, the preview title, and elapsed time. */
     private void update_ui()
     {
         if (recorder == null)

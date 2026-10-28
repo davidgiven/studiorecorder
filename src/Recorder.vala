@@ -161,7 +161,14 @@ public class Recorder : GLib.Object
             var reserved = File.new_for_path(partial_path).create(FileCreateFlags.NONE);
             reserved.close();
             mux = make("matroskamux");
-            mux.set("writing-app", "StudioRecorder (Vala)", "offset-to-zero", true);
+            // Streaming Matroska stays readable without a final duration/index trailer.
+            mux.set(
+                /* first_property_name= */ "writing-app",
+                /* writing_app= */ "StudioRecorder (Vala)",
+                /* property_name= */ "offset-to-zero",
+                /* offset_to_zero= */ true,
+                /* property_name= */ "streamable",
+                /* streamable= */ true);
             var sink = make("filesink");
             sink.set("location", partial_path, "sync", false);
             chain({ mux, sink });
@@ -359,13 +366,13 @@ public class Recorder : GLib.Object
     }
 
     /** Describe negotiated capture PCM before meter conversion, including shared and monitor inputs. */
-    public string audio_summary(Input? input)
+    public string audio_summary(Input? input, bool compact = false)
     {
         if (input == null)
             return "No audio";
         var pad = audio_pads.lookup(input.identity);
         var caps = pad != null ? pad.get_current_caps() : null;
-        return AudioFormat.summary(caps);
+        return AudioFormat.summary(caps, compact);
     }
 
     /** Add capture-source identity and GStreamer debug details to a pipeline error. */

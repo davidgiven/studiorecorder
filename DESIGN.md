@@ -18,7 +18,7 @@ Selecting a camera probes its V4L2 device for integer, boolean, menu, and intege
 
 Accepted readback values are saved as `v4l2-<decimal-control-id>` keys alongside audio settings in the same stable video-source group. Resetting a control saves its driver default. Unsupported, stale, read-only, inactive, and volatile saved values are skipped without deleting their preferences. `prepare-format` restores an immutable snapshot on GStreamer's already-open descriptor at startup and pipeline rebuilds, applying menu/boolean modes before numeric values. The frame-rate lock runs afterward; exposure-auto-priority remains excluded from the UI and saved overrides. GTK and preference-file access stay on the main loop. A separate nonblocking descriptor handles UI metadata and scalar reads/writes through extended-control ioctls with a legacy scalar fallback. Capture buffers and media processing remain owned by GStreamer. Button, relative-movement, execute-on-write, bitmask, integer64, string, and compound controls are not presented as sliders. Hardware errors are shown in the controls panel and rejected values are not saved. Controls are editable during preview and recording where the driver permits it; these changes do not rebuild capture pipelines.
 
-Audio meters overlay thumbnail images. The main preview's top-left overlay shows the selected source's negotiated target FPS and actual post-encoding recording FPS. Actual FPS is a ten-second rolling average of complete encoded video frames, refreshed every quarter-second. It uses available sampling time during warmup, resets for each take, and shows a dash while paused. The measurement comes from the recording branch and is independent of preview frame delivery. It measures encoder output throughput, not physical sensor synchronization or durable disk writes.
+Audio meters overlay thumbnail images. The Main preview panel title shows the selected source's negotiated resolution, audio format, channel count, sample frequency, and actual post-encoding recording FPS. Actual FPS is a ten-second rolling average of complete encoded video frames, refreshed every quarter-second. It uses available sampling time during warmup, resets for each take, and shows a dash while paused. The measurement comes from the recording branch and is independent of preview frame delivery. It measures encoder output throughput, not physical sensor synchronization or durable disk writes.
 
 ## Source and build layout
 
@@ -267,11 +267,11 @@ Multiple hardware clocks, drift, and physical capture still require validation.
 See the [ALSA hw plugin documentation](https://www.alsa-project.org/alsa-doc/alsa-lib/pcm_plugins.html)
 for the distinction between raw hardware and conversion plugins.
 
-The main preview overlay includes negotiated video resolution and the selected
+The main preview title includes negotiated video resolution and the selected
 input's capture PCM format, channel count, and sample frequency in Hz. Audio
 caps are read before the tee and meter conversion, so packed 24-bit and other
-native formats are reported accurately. Screen also lists independent computer
-audio when enabled and assigned a different microphone or No audio. Pending
+native formats are reported accurately. The title uses
+`Main preview - RESOLUTION - FORMAT x CHANNELS x FREQUENCY - RECORDINGFPS`. Pending
 negotiation is shown explicitly rather than guessed from caps templates.
 
 Tools provides a live pipeline export via `Gst.Debug.bin_to_dot_data(ALL)`.
@@ -291,3 +291,21 @@ continue.
 GTK's [node editor](https://docs.gtk.org/gtk4/gtk4-node-editor.html) consumes
 render-node files; [Gsk.RenderNode serialization](https://docs.gtk.org/gsk4/method.RenderNode.write_to_file.html)
 provides that format.
+
+The Matroska muxer uses `streamable=true` and keeps `offset-to-zero=true`.
+Streaming output has an unknown-length Segment and omits final Duration,
+SeekHead, and Cues indexing. Clean Stop still sends EOS to drain encoders and
+queues, then closes and publishes the `.mkv` name; this is clean take completion,
+not a required container-index finalization step. Abrupt process death leaves
+`.mkv.partial` with whatever media reached the sink. It does not guarantee
+survival of buffered data or power loss. Executable checks parse EBML headers,
+measure actual packet spans rather than relying on a duration header, and kill
+a synthetic recording before remuxing and decoding all five tracks.
+
+Packet timestamps remain relative to the take. Matroska DateUTC identifies
+segment creation and is not defined as a precise first-frame UTC anchor.
+GStreamer can add a cluster timestamp offset, but Unix-epoch packet PTS is not
+SMPTE source timecode and does not establish Resolve timeline placement. A
+UTC-to-media clock mapping, frame-rate-aware source timecode/date, and a verified
+Resolve import representation are separate work; none is implied by enabling
+streamable output.

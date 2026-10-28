@@ -1,8 +1,8 @@
 /** Selects uncompressed capture formats that can be muxed without changing samples. */
 public class AudioFormat : Object
 {
-    /** Format actual negotiated PCM caps for the preview overlay without assuming device defaults. */
-    public static string summary(Gst.Caps? caps)
+    /** Format actual negotiated PCM caps for media summaries without assuming device defaults. */
+    public static string summary(Gst.Caps? caps, bool compact = false)
     {
         if (caps == null || caps.is_empty() || caps.is_any())
             return "Detecting audio format…";
@@ -12,6 +12,10 @@ public class AudioFormat : Object
         string? sample = format.get_string("format");
         if (sample == null || !format.get_int("channels", out channels) || !format.get_int("rate", out rate))
             return "Detecting audio format…";
+
+        // Use a compact single-line representation for the preview panel title.
+        if (compact)
+            return "%s x %d x %d Hz".printf(sample, channels, rate);
         return "%s · %d channels · %d Hz".printf(sample, channels, rate);
     }
 
