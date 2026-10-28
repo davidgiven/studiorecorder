@@ -155,6 +155,7 @@ public class Recorder : GLib.Object
                 /* first_element= */ Environment.get_current_dir(),
                 /* path_component= */ "StudioRecorder_%s_%s.mkv".printf(stamp, Uuid.string_random()));
             partial_path = final_path + ".partial";
+
             // Exclusive reservation; never truncate a pre-existing take.
             var reserved = File.new_for_path(partial_path).create(FileCreateFlags.NONE);
             reserved.close();
@@ -205,19 +206,35 @@ public class Recorder : GLib.Object
         labels.insert(source.name, label);
         labels.insert(decoder.name, label);
 
-        // Constrain portal sources to video before decodebin, which otherwise also accepts audio.
+        // Camera caps constrain capture before decoding; desktop sizes use native scaling.
         var tee = make("tee");
-        if (source.get_factory().get_name() == "pipewiresrc")
+        var mode = camera.input.video_mode;
+        bool desktop = camera.input.identity.has_prefix("desktop-screen");
+        if (mode != null && !desktop)
+            chain({ source, filter(mode.caps("video/x-raw") + ";" + mode.caps("image/jpeg") + ";" + mode.caps("video/x-h264") + ";" + mode.caps("video/x-h265")), decoder });
+        else if (source.get_factory().get_name() == "pipewiresrc")
             chain({ source, filter("video/x-raw"), decoder });
         else
             chain({ source, decoder });
-        pipeline.add(tee);
+
+        // Scale desktop frames natively before sharing them between preview and recording.
+        Gst.Element decoded_target = tee;
+        if (mode != null && desktop)
+        {
+            var scale = make("videoscale");
+            chain({ scale, make("videorate"), filter(mode.caps()), tee });
+            decoded_target = scale;
+        }
+        else
+            pipeline.add(tee);
+
+        // Track negotiated output caps after any desktop scaling.
         var track = new VideoTrack(camera, tee.get_static_pad("sink"));
         videos.append(track);
 
         // Decoded pads arrive asynchronously; only raw video can feed the video tee.
         // Capture only the pad and a weak pipeline, avoiding a pipeline/closure cycle.
-        Gst.Pad target = tee.get_static_pad("sink");
+        Gst.Pad target = decoded_target.get_static_pad("sink");
         weak Gst.Pipeline weak_pipeline = pipeline;
         decoder.pad_added.connect(
             /* handler= */ (pad) =>

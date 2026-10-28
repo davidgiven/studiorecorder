@@ -1,6 +1,43 @@
 [CCode (cheader_filename = "linux/videodev2.h,sys/ioctl.h")]
 namespace V4L2
 {
+    /** Current single-plane capture dimensions from the kernel format union. */
+    [CCode (cname = "struct v4l2_format", has_type_id = false)]
+    public struct Format
+    {
+        public uint32 type;
+        [CCode (cname = "fmt.pix.width")]
+        public uint32 width;
+        [CCode (cname = "fmt.pix.height")]
+        public uint32 height;
+    }
+
+    /** Current capture frame interval from the kernel stream-parameter union. */
+    [CCode (cname = "struct v4l2_streamparm", has_type_id = false)]
+    public struct StreamParameters
+    {
+        public uint32 type;
+        [CCode (cname = "parm.capture.timeperframe.numerator")]
+        public uint32 numerator;
+        [CCode (cname = "parm.capture.timeperframe.denominator")]
+        public uint32 denominator;
+    }
+
+    [CCode (cname = "V4L2_BUF_TYPE_VIDEO_CAPTURE")]
+    public const uint32 VIDEO_CAPTURE;
+    [CCode (cname = "VIDIOC_G_FMT")]
+    public const ulong G_FMT;
+    [CCode (cname = "VIDIOC_G_PARM")]
+    public const ulong G_PARM;
+
+    /** Read the active capture format without changing the device. */
+    [CCode (cname = "ioctl")]
+    public int get_format(int fd, ulong request, ref Format format);
+
+    /** Read the active frame interval without changing the device. */
+    [CCode (cname = "ioctl")]
+    public int get_parameters(int fd, ulong request, ref StreamParameters parameters);
+
     /** Kernel control metadata; the C header supplies the full structure layout. */
     [CCode (cname = "struct v4l2_queryctrl", has_type_id = false)]
     public struct QueryControl

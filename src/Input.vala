@@ -85,6 +85,11 @@ public class Input : GLib.Object
         set;
     }
 
+    /** Detected capture modes and the explicit selection retained across pipeline rebuilds. */
+    public List<VideoMode> video_modes = new List<VideoMode>();
+    public VideoMode? video_mode;
+    public bool modes_probed;
+
     /** Last saved scalar controls; accessed only on the main loop and copied before capture starts. */
     public HashTable<string, int> saved_controls = new HashTable<string, int>(str_hash, str_equal);
 

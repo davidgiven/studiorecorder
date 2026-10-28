@@ -33,15 +33,17 @@ private class Thumbnail : GLib.Object
 {
     public VideoTrack track;
     public Gtk.Label details;
-    public Gtk.LevelBar? meter;
+    public Gtk.Picture image;
+    public Gtk.LevelBar meter;
     public Gtk.DropDown selector;
     public Gtk.ToggleButton record_toggle;
 
     /** Group each preview track with the widgets updated by meters, statistics, and audio selection. */
-    public Thumbnail (VideoTrack track, Gtk.Label details, Gtk.LevelBar? meter, Gtk.DropDown selector, Gtk.ToggleButton record_toggle)
+    public Thumbnail (VideoTrack track, Gtk.Label details, Gtk.Picture image, Gtk.LevelBar meter, Gtk.DropDown selector, Gtk.ToggleButton record_toggle)
     {
         this.track = track;
         this.details = details;
+        this.image = image;
         this.meter = meter;
         this.selector = selector;
         this.record_toggle = record_toggle;
@@ -84,6 +86,7 @@ public class Application : GLib.Object
     private Gtk.Box thumbnails;
     private Gtk.Box preview_controls;
     private CameraControlsPanel? camera_controls_panel;
+    private VideoModePanel? video_mode_panel;
     public int exit_code
     {
         get;
@@ -292,6 +295,7 @@ public class Application : GLib.Object
             sources_ready(test_cameras());
             return;
         }
+
         // Device-provider startup may wait for a service. GTK and signals stay responsive.
         new Thread<void*> (
             /* name= */ "device-discovery",
@@ -375,6 +379,14 @@ public class Application : GLib.Object
                 preferences.restore_audio(camera, audio_sources);
                 camera.input.saved_controls = preferences.load_controls(camera.input);
             }
+
+        // Probe current formats before applying any still-supported saved choices.
+        foreach (var camera in cameras)
+        {
+            VideoMode.probe(camera.input);
+            if (preferences != null)
+                preferences.restore_video_mode(camera.input);
+        }
         prepare_pipeline(false);
     }
 
@@ -404,6 +416,7 @@ public class Application : GLib.Object
         {
             if (recorder != null)
             {
+                freeze_previews();
                 recorder.close();
                 recorder = null;
             }
@@ -500,6 +513,7 @@ public class Application : GLib.Object
             if (preferences != null)
                 preferences.save_audio(camera);
             set_state(TransportState.PREPARING);
+
             // Let the dropdown notification finish; normal priority prevents redraw starvation.
             Idle.add(
                 /* function= */ () =>
@@ -519,6 +533,8 @@ public class Application : GLib.Object
     {
         if (window == null)
             return;
+        if (video_mode_panel != null)
+            video_mode_panel.sensitive = state == TransportState.PAUSED && !exiting;
         play_button.sensitive = state == TransportState.PAUSED && !exiting && has_recording_channels();
         stop_button.sensitive = (state == TransportState.RECORDING || state == TransportState.STARTING) && !exiting;
         foreach (var item in items)
@@ -564,25 +580,103 @@ public class Application : GLib.Object
         cr.stroke();
     }
 
+    /** Retain immutable native paintable snapshots while capture devices are reopened. */
+    private void freeze_previews()
+    {
+        if (headless)
+            return;
+
+        // Snapshot the displayed frames before their owning capture graph is closed.
+        if (picture.paintable != null)
+            picture.paintable = picture.paintable.get_current_image();
+        foreach (var item in items)
+            if (item.image.paintable != null)
+                item.image.paintable = item.image.paintable.get_current_image();
+    }
+
+    /** Rebind existing widgets when the source list is unchanged, preserving focus and scroll positions. */
+    private bool rebind_previews()
+    {
+        if (items.length() == 0 || items.length() != recorder.videos.length())
+            return false;
+
+        // Match every source before committing any widget changes.
+        var replacements = new List<Thumbnail>();
+        foreach (var track in recorder.videos)
+        {
+            Thumbnail? match = null;
+            foreach (var item in items)
+                if (item.track.camera.input.identity == track.camera.input.identity)
+                    match = item;
+            if (match == null)
+                return false;
+            replacements.append(match);
+        }
+
+        // Rebind the validated widgets and reset meters for the replacement capture graph.
+        uint index = 0;
+        foreach (var track in recorder.videos)
+        {
+            var item = replacements.nth_data(index++);
+            item.track = track;
+            item.meter.visible = track.camera.audio != null;
+            item.meter.value = 0;
+
+            // Reflect audio changes without replacing the dropdown or its focus state.
+            uint selected = 0;
+            uint audio_index = 1;
+            foreach (var audio in audio_sources)
+            {
+                if (track.camera.audio != null && audio.identity == track.camera.audio.identity)
+                    selected = audio_index;
+                audio_index++;
+            }
+            item.selector.selected = selected;
+        }
+        update_ui();
+        return true;
+    }
+
+    /** Select the current track for a stable source identity rather than retaining a retired graph. */
+    private void select_source(string identity)
+    {
+        if (recorder == null)
+            return;
+
+        // Resolve clicks against the replacement graph rather than a captured retired track.
+        foreach (var track in recorder.videos)
+            if (track.camera.input.identity == identity)
+            {
+                select_preview(track);
+                return;
+            }
+    }
+
     /** Rebuild thumbnails and audio selectors while preserving the selected main preview. */
     private void populate_previews()
     {
-        picture.paintable = null;
+        if (rebind_previews())
+            return;
+
+        // Only a changed source list requires replacing thumbnail widgets.
         items = new List<Thumbnail> ();
         Gtk.Widget? child;
         while ((child = thumbnails.get_first_child()) != null)
             thumbnails.remove(child);
 
         // Rebuild each selectable preview and its independent audio selector.
-        bool first = true;
+        VideoTrack? selected_track = null;
         foreach (var track in recorder.videos)
         {
+            var camera = track.camera;
             var column = new Gtk.Box(Gtk.Orientation.VERTICAL, 2);
             var details = new Gtk.Label("— × — · — fps")
             {
                 xalign = 0.5f, can_target = false
             };
             column.append(details);
+
+            // Keep the video image and its overlays separate from source labels and selectors.
             var image = new Gtk.Picture.for_paintable(track.paintable)
             {
                 can_shrink = true
@@ -594,15 +688,14 @@ public class Application : GLib.Object
             };
 
             // A thumbnail meter follows its selected audio input, including shared microphones.
-            Gtk.LevelBar? meter = null;
-            if (track.camera.audio != null)
+            var meter = new Gtk.LevelBar.for_interval(0, 1)
             {
-                meter = new Gtk.LevelBar.for_interval(0, 1)
-                {
-                    valign = Gtk.Align.END, can_target = false
-                };
-                overlay.add_overlay(meter);
-            }
+                valign = Gtk.Align.END,
+                can_target = false,
+                visible = camera.audio != null
+            };
+            overlay.add_overlay(meter);
+
             // Bind exclusion visibility to the model so toggles and pipeline rebuilds stay in sync.
             var exclusion = new Gtk.DrawingArea()
             {
@@ -611,19 +704,21 @@ public class Application : GLib.Object
                 vexpand = true
             };
             exclusion.set_draw_func(draw_channel_exclusion);
-            track.camera.bind_property(
+            camera.bind_property(
                 /* source_property= */ "record-enabled",
                 /* target= */ exclusion,
                 /* target_property= */ "visible",
                 /* flags= */ BindingFlags.SYNC_CREATE | BindingFlags.INVERT_BOOLEAN);
             overlay.add_overlay(exclusion);
             column.append(overlay);
-            column.append(new Gtk.Label(track.camera.input.name));
+
+            // Thumbnail clicks select video without changing its audio assignment.
+            column.append(new Gtk.Label(camera.input.name));
             var button = new Gtk.Button()
             {
                 child = column
             };
-            button.clicked.connect(() => select_preview(track));
+            button.clicked.connect(() => select_source(camera.input.identity));
             var item = new Gtk.Box(Gtk.Orientation.VERTICAL, 2);
             item.append(button);
 
@@ -637,7 +732,7 @@ public class Application : GLib.Object
             foreach (var audio in audio_sources)
             {
                 names += audio.name;
-                if (track.camera.audio != null && audio.identity == track.camera.audio.identity)
+                if (camera.audio != null && audio.identity == camera.audio.identity)
                     selected = index;
                 index++;
             }
@@ -653,50 +748,62 @@ public class Application : GLib.Object
                     if (choice > audio_sources.length())
                         return;
                     Input? input = choice > 0 ? audio_sources.nth_data(choice - 1) : null;
-                    select_audio(track.camera.input.identity, input != null ? input.identity : null);
+                    select_audio(camera.input.identity, input != null ? input.identity : null);
                 });
             item.append(selector);
 
             // Recording inclusion is independent of preview selection and paused audio assignment.
             var record_toggle = new Gtk.ToggleButton.with_label("Record channel")
             {
-                active = track.camera.record_enabled,
+                active = camera.record_enabled,
                 sensitive = state == TransportState.PAUSED && !exiting,
-                tooltip_text = track.camera.input.identity.has_prefix("desktop-screen")
+                tooltip_text = camera.input.identity.has_prefix("desktop-screen")
                     ? "Record Screen, its selected audio, and independent computer audio"
                     : "Record this channel's video and selected audio in subsequent takes"
             };
             record_toggle.toggled.connect(
                 /* handler= */ () =>
                 {
-                    if (!set_record_enabled(track.camera.input.identity, record_toggle.active))
-                        record_toggle.active = track.camera.record_enabled;
+                    if (!set_record_enabled(camera.input.identity, record_toggle.active))
+                        record_toggle.active = camera.record_enabled;
                 });
             item.append(record_toggle);
+
+            // Publish the complete thumbnail and retain its widgets for future graph replacements.
             thumbnails.append(item);
             items.append(
                 /* data= */ new Thumbnail(
                     /* track= */ track,
                     /* details= */ details,
+                    /* image= */ image,
                     /* meter= */ meter,
                     /* selector= */ selector,
                     /* record_toggle= */ record_toggle));
-            if (first || track.camera.input.identity == selected_identity)
-            {
-                select_preview(track);
-                first = false;
-            }
+            if (camera.input.identity == selected_identity)
+                selected_track = track;
         }
+
+        // Resolve the old selection before choosing a fallback; selecting the first would overwrite it.
+        if (selected_track == null)
+            selected_track = recorder.videos.nth_data(0);
+        if (selected_track != null)
+            select_preview(selected_track);
         update_ui();
     }
 
     /** Display an existing track paintable without changing capture or recording assignments. */
     private void select_preview(VideoTrack track)
     {
+        bool changed = selected_identity != track.camera.input.identity;
         selected_identity = track.camera.input.identity;
-        picture.paintable = track.paintable;
+        foreach (var item in items)
+            if (item.track == track)
+                picture.paintable = item.image.paintable;
+
+        // Keep existing controls and scroll position when only the underlying graph changed.
         show_framerate(track);
-        populate_camera_controls(track.camera.input);
+        if (changed || camera_controls_panel == null)
+            populate_camera_controls(track.camera.input);
     }
 
     /** Probe the selected source's real camera controls without rebuilding capture pipelines. */
@@ -705,7 +812,32 @@ public class Application : GLib.Object
         Gtk.Widget? child;
         while ((child = preview_controls.get_first_child()) != null)
             preview_controls.remove(child);
-        camera_controls_panel = new CameraControlsPanel(input, preferences);
+
+        // Format changes persist immediately and defer graph replacement until notifications finish.
+        video_mode_panel = new VideoModePanel(input);
+        video_mode_panel.sensitive = state == TransportState.PAUSED && !exiting;
+        video_mode_panel.changed.connect(
+            /* handler= */ () =>
+            {
+                if (state != TransportState.PAUSED || exiting)
+                    return;
+
+                // Save the complete selection before beginning a paused preview rebuild.
+                if (preferences != null)
+                    preferences.save_video_mode(input);
+                set_state(TransportState.PREPARING);
+                Idle.add(
+                    /* function= */ () =>
+                    {
+                        if (!exiting)
+                            prepare_pipeline(false);
+                        return Source.REMOVE;
+                    },
+                    /* priority= */ Priority.DEFAULT);
+            });
+
+        // Keep format selectors below the source name and above native camera adjustments.
+        camera_controls_panel = new CameraControlsPanel(input, preferences, video_mode_panel);
         preview_controls.append(camera_controls_panel);
     }
 
@@ -732,15 +864,56 @@ public class Application : GLib.Object
 
         // Use one monotonic timestamp for every track in this UI refresh.
         uint64 now = Gst.Util.get_timestamp();
+        bool restore_capture = false;
         foreach (var item in items)
         {
+            bool detecting_mode = item.track.camera.input.video_mode == null;
             item.track.sample(now);
+
+            // Some backends expose the current mode only after their first negotiated frame.
+            if (detecting_mode && item.track.camera.input.video_mode != null)
+            {
+                var input = item.track.camera.input;
+                var negotiated = input.video_mode;
+                if (preferences != null)
+                    preferences.restore_video_mode(input);
+                restore_capture |= input.video_mode != negotiated;
+                if (input.identity == selected_identity)
+                    populate_camera_controls(input);
+            }
+
+            // Retain the previous format summary until replacement caps provide real dimensions.
             var track = item.track;
             string size = track.width > 0 ? "%d × %d".printf(track.width, track.height) : "— × —";
-            item.details.label = "%s · %s fps".printf(size, rate_text(track.target));
+            if (track.width > 0)
+                item.details.label = "%s · %s fps".printf(size, rate_text(track.target));
+
+            // New sink paintables remain empty until the first frame; keep the previous snapshot meanwhile.
+            if (track.paintable != null && track.paintable.get_intrinsic_width() > 0)
+                item.image.paintable = track.paintable;
             if (track.camera.input.identity == selected_identity)
-                show_framerate(track);
+            {
+                picture.paintable = item.image.paintable;
+                if (!track.target.is_nan())
+                    show_framerate(track);
+            }
         }
+
+        // Portal dimensions may arrive only with negotiated caps; restore saved scaling afterward.
+        if (restore_capture && !exiting && (state == TransportState.PAUSED || state == TransportState.PREPARING))
+        {
+            set_state(TransportState.PREPARING);
+            Idle.add(
+                /* function= */ () =>
+                {
+                    if (!exiting)
+                        prepare_pipeline(false);
+                    return Source.REMOVE;
+                },
+                /* priority= */ Priority.DEFAULT);
+        }
+
+        // Synchronize transport sensitivity after any deferred format restoration.
         update_transport();
     }
 
@@ -902,6 +1075,7 @@ public class Application : GLib.Object
         // Publish only after EOS; preserve the partial file when finalization did not complete.
         try
         {
+            freeze_previews();
             recorder.close(finalized);
             status(
                 /* message= */ (finalized ? "Saved: " : "Incomplete recording: ") +

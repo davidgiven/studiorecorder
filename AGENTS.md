@@ -32,7 +32,7 @@ Use synthetic sources for automated recording checks. Do not treat synthetic or 
 
 ## Code conventions
 
-Document every class, constructor, function, and method. Divide longer bodies into logical paragraphs separated by whitespace and comments explaining purpose, ownership, or lifecycle constraints.
+Document every class, constructor, function, and method. Divide code into logical paragraphs. Separate each paragraph from the preceding code with a blank line followed by a comment explaining the next paragraph’s purpose, ownership, or lifecycle constraints. Apply this within longer functions, constructors, methods, loops, and callbacks; keep short, single-purpose bodies together.
 
 Use four-space indentation and Allman-style braces. Do not put spaces before function-call or function-declaration parentheses, including calls following `yield`. Put separate assignments and statements on separate lines. Indent switch bodies and case bodies, and leave blank lines between a clause's `break` and the next case. Do not put a first statement beside its case label unless the complete clause, including `break`, fits on that line; separate lines are always acceptable.
 

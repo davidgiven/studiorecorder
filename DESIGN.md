@@ -159,3 +159,45 @@ Historical hardware tests of the retired Python implementation exercised a C920 
 - [identity](https://gstreamer.freedesktop.org/documentation/coreelements/identity.html): native encoded-buffer counters.
 - [V4L2 camera controls](https://docs.kernel.org/userspace-api/media/v4l/ext-ctrls-camera.html): exposure and dynamic frame-rate control.
 - [Matroska tags](https://www.matroska.org/technical/tagging.html) and [tag precedence](https://www.matroska.org/technical/tags-precedence.html): track identification and reader compatibility.
+
+## Capture format selection
+
+`VideoMode` queries the native capture source in READY before preview startup.
+Normalized caps supply discrete camera dimensions and rational frame rates;
+continuous frame-rate ranges also offer supported common rates. Continuous size
+ranges currently use the backend's fixated size. `VideoModePanel` presents
+resolution and dependent frame-rate selectors above scalar camera controls.
+Changes are paused-only and rebuild preview capture, retaining channel settings.
+Camera caps are applied before decoding. Screen dimensions come from X11 geometry
+or the portal's optional size metadata; native, half, and quarter sizes are
+implemented with GStreamer videoscale/videorate before preview and recording split.
+Without portal size metadata, the first negotiated preview supplies native
+screen dimensions. V4L2 `VIDIOC_G_FMT` and `VIDIOC_G_PARM` supply the camera's
+current dimensions and exact reciprocal frame interval before capture starts.
+Backends without those queries use the first negotiated preview format. Until
+then the selectors remain empty and disabled, with a waiting message.
+
+Preferences store `video-width`, `video-height`, `video-rate-numerator`, and
+`video-rate-denominator` in the existing stable source group. A supported saved
+mode overrides the probed current mode; missing, malformed, or unavailable saved
+modes retain the current setting without erasing the saved preference. Audio
+and scalar-control saves preserve these keys. Synthetic mode does not access
+user preferences. The UI has no Automatic entry. Physical camera mode changes
+and scaled screen recordings still require hardware validation.
+
+Preview rebuilds retain the selected source identity and rebind existing
+thumbnail widgets to replacement tracks when the source list is unchanged.
+Audio selectors, record toggles, camera controls, focus, and scroll positions
+remain in place. Before closing capture, native immutable paintable snapshots
+hold the last main-preview and thumbnail frames until the replacement sinks
+have image dimensions. Format labels remain visible until new caps are ready.
+Thumbnail clicks resolve stable source identities against the current recorder,
+so callbacks do not retain retired video tracks. When sources change, selection
+is resolved across the complete new source list before falling back to its first
+entry.
+
+`make .obj/test-preview-ui` builds a display-dependent GTK regression. Run
+`GTK_A11Y=none G_DEBUG=fatal-criticals ./.obj/test-preview-ui` in a desktop session.
+It uses synthetic media to check selection, widget identity, and retained preview
+images across resolution, FPS, audio, and take transitions. This does not
+validate physical device restart latency or seamless capture.

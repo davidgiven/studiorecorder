@@ -71,6 +71,50 @@ public class Preferences : GLib.Object
         save();
     }
 
+    /** Restore only a still-supported mode, keeping the probed current mode for stale settings. */
+    public void restore_video_mode(Input input)
+    {
+        try
+        {
+            string group = channel_group(input);
+            int width = settings.get_integer(group, "video-width");
+            int height = settings.get_integer(group, "video-height");
+            int numerator = settings.get_integer(group, "video-rate-numerator");
+            int denominator = settings.get_integer(group, "video-rate-denominator");
+
+            // Reject incomplete values before matching the exact rational rate to supported modes.
+            if (width <= 0 || height <= 0 || numerator <= 0 || denominator <= 0)
+                return;
+            foreach (var mode in input.video_modes)
+                if (mode.width == width && mode.height == height &&
+                    (int64) mode.numerator * denominator == (int64) numerator * mode.denominator)
+                {
+                    input.video_mode = mode;
+                    return;
+                }
+        }
+        catch (KeyFileError error)
+        {
+            // Missing or malformed preferences retain the device's actual current mode.
+        }
+    }
+
+    /** Persist exact dimensions and rational FPS alongside other source preferences. */
+    public void save_video_mode(Input input)
+    {
+        var mode = input.video_mode;
+        if (mode == null)
+            return;
+
+        // Update only format keys so audio, scalar controls, and future settings survive.
+        string group = channel_group(input);
+        settings.set_integer(group, "video-width", mode.width);
+        settings.set_integer(group, "video-height", mode.height);
+        settings.set_integer(group, "video-rate-numerator", mode.numerator);
+        settings.set_integer(group, "video-rate-denominator", mode.denominator);
+        save();
+    }
+
     /** Load saved scalar camera values without removing settings for temporarily absent controls. */
     public HashTable<string, int> load_controls(Input input)
     {

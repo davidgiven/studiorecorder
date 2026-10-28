@@ -25,11 +25,28 @@ public class VideoTrack : GLib.Object
         if (caps != null && !caps.is_empty())
         {
             unowned var structure = caps.get_structure(0);
-            int numerator, denominator;
+            int numerator = 0, denominator = 0;
             if (structure.get_fraction("framerate", out numerator, out denominator) && denominator > 0)
                 target = (double) numerator / denominator;
             structure.get_int("width", out width);
             structure.get_int("height", out height);
+
+            // Backends without a readable current format use the first negotiated capture caps.
+            if (camera.input.video_mode == null && width > 0 && height > 0 && numerator > 0 && denominator > 0)
+            {
+                var input = camera.input;
+                if (input.identity.has_prefix("desktop-screen") && input.video_modes.length() == 0)
+                {
+                    input.width = (uint) width;
+                    input.height = (uint) height;
+                    input.modes_probed = false;
+                    VideoMode.probe(input);
+                }
+
+                // Retain the negotiated mode even when the initial caps probe omitted it.
+                input.video_mode = new VideoMode(width, height, numerator, denominator);
+                VideoMode.add(input, input.video_mode);
+            }
         }
 
         // Count encoded access units, independently of preview delivery or rendering speed.

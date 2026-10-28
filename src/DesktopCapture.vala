@@ -163,6 +163,7 @@ public class DesktopCapture : GLib.Object
                 if (waiting)
                 {
                     waiting = false;
+
                     // Disconnecting a cancellable handler from inside itself can deadlock.
                     Idle.add(
                         /* function= */ () =>
@@ -239,6 +240,7 @@ public class DesktopCapture : GLib.Object
         string sender = connection.get_unique_name().substring(1).replace(".", "_");
         session = PATH + "/session/" + sender + "/studio_" + Uuid.string_random().replace("-", "");
         Variant created = yield request("CreateSession");
+
         // The portal returns this object path as a string for historical compatibility.
         Variant? handle = created.lookup_value("session_handle", new VariantType("s"));
         if (handle == null)
@@ -294,6 +296,16 @@ public class DesktopCapture : GLib.Object
         screen.factory = "pipewiresrc";
         screen.remote_fd = remote_fd;
         var properties = stream.get_child_value(1);
+
+        // Prefer portal geometry for native, half, and quarter screen-size choices.
+        Variant? size = properties.lookup_value("size", new VariantType("(ii)"));
+        if (size != null)
+        {
+            screen.width = (uint) int.max(0, size.get_child_value(0).get_int32());
+            screen.height = (uint) int.max(0, size.get_child_value(1).get_int32());
+        }
+
+        // Preserve stable PipeWire routing independently of the chosen capture dimensions.
         Variant? serial = properties.lookup_value("pipewire-serial", null);
         if (serial != null)
             screen.remote_target = serial.print(false).replace("uint64 ", "").replace("uint32 ", "");
@@ -308,6 +320,7 @@ public class DesktopCapture : GLib.Object
         if (closed)
             return;
         closed = true;
+
         // Send Close before cancelling pending operations, while request paths are available.
         if (connection != null)
         {

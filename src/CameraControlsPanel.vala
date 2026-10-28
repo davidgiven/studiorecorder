@@ -3,8 +3,8 @@ public class CameraControlsPanel : Gtk.Box
 {
     private List<CameraControlRow> rows = new List<CameraControlRow>();
 
-    /** Open controls for a real V4L2 source; screen, synthetic, and unsupported sources show a message. */
-    public CameraControlsPanel(Input input, Preferences? preferences)
+    /** Show the source name, optional format selectors, and supported V4L2 adjustments. */
+    public CameraControlsPanel(Input input, Preferences? preferences, Gtk.Widget? format_controls = null)
     {
         Object(orientation: Gtk.Orientation.VERTICAL, spacing: 12);
         var source = new Gtk.Label(input.name)
@@ -14,6 +14,10 @@ public class CameraControlsPanel : Gtk.Box
         };
         source.add_css_class("heading");
         append(source);
+        if (format_controls != null)
+            append(format_controls);
+
+        // Display unsupported controls and driver errors beneath the format selectors.
         var message = new Gtk.Label(null)
         {
             xalign = 0,
@@ -50,6 +54,7 @@ public class CameraControlsPanel : Gtk.Box
                             if (preferences != null)
                                 preferences.save_control(input, id, value);
                         }
+
                         // Mode controls can enable manual sliders without recreating widgets mid-drag.
                         var panel = owner.get() as CameraControlsPanel;
                         if (panel != null)

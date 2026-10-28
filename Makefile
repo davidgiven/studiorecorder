@@ -6,8 +6,8 @@ VALAC ?= valac
 UNCRUSTIFY ?= uncrustify
 PANDOC ?= pandoc
 VALA_PACKAGES = --pkg gtk4 --pkg libadwaita-1 --pkg libpanel-1 --pkg gstreamer-1.0 --pkg gio-unix-2.0 --pkg posix
-VALA_CAPTURE = src/camera-controls.vala src/capture-utils.vala src/Input.vala src/Camera.vala src/CameraControl.vala src/CameraControls.vala src/DesktopCapture.vala
-VALA_CORE = $(VALA_CAPTURE) src/Registry.vala src/CameraControlRow.vala src/CameraControlsPanel.vala src/Preferences.vala src/test-sources.vala \
+VALA_CAPTURE = src/VideoMode.vala src/camera-controls.vala src/capture-utils.vala src/Input.vala src/Camera.vala src/CameraControl.vala src/CameraControls.vala src/DesktopCapture.vala
+VALA_CORE = $(VALA_CAPTURE) src/Registry.vala src/CameraControlRow.vala src/CameraControlsPanel.vala src/VideoModePanel.vala src/Preferences.vala src/test-sources.vala \
 	src/RollingFramerate.vala src/VideoTrack.vala src/Recorder.vala src/RecordingWorkspace.vala src/Application.vala
 VALA_NATIVE = src/native.vapi src/v4l2.vapi
 VALA_FLAGS = -g $(VALA_PACKAGES) -X -Isrc -X -lX11 -X -lm
@@ -46,3 +46,8 @@ test: all .obj/test-unit .obj/test-portal
 .obj/test-controls-ui: $(VALA_CAPTURE) $(VALA_NATIVE) src/CameraControlRow.vala tests/FakeCameraControls.vala tests/control-ui-test.vala
 	mkdir -p .obj/controls-ui
 	$(VALAC) $(VALA_FLAGS) --directory .obj/controls-ui -o $(abspath $@) $(VALA_CAPTURE) $(VALA_NATIVE) src/CameraControlRow.vala tests/FakeCameraControls.vala tests/control-ui-test.vala
+
+# Display-dependent integration check for source selection and stable widgets across rebuilds.
+.obj/test-preview-ui: $(VALA_CORE) $(VALA_NATIVE) tests/preview-ui-test.vala
+	mkdir -p .obj/preview-ui
+	$(VALAC) $(VALA_FLAGS) --directory .obj/preview-ui -o $(abspath $@) $(VALA_CORE) $(VALA_NATIVE) tests/preview-ui-test.vala

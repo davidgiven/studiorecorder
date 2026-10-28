@@ -128,6 +128,7 @@ private void test_encoded_rate()
 
         // Construct a real recording pipeline with synthetic inputs and no rendering branch.
         var inputs = test_cameras();
+        inputs.nth_data(2).input.video_mode = new VideoMode(320, 240, 30, 1);
         var required = new List<Input> ();
         required.append(inputs.nth_data(2).audio);
         var recorder = new Recorder(true, false, true);
@@ -162,6 +163,11 @@ private void test_encoded_rate()
                 {
                     track.sample(Gst.Util.get_timestamp());
                     assert_near(track.target, 30);
+                    if (track.camera.input == inputs.nth_data(2).input)
+                    {
+                        assert(track.width == 320);
+                        assert(track.height == 240);
+                    }
                     assert(track.actual > 25 && track.actual < 35);
                     assert(track.paintable == null);
                 }
@@ -638,6 +644,34 @@ private void test_preferences()
         assert(after_restart.load_controls(other.input).size() == 0);
         after_restart.restore_audio(restored, sources);
         assert(restored.audio == audio);
+        // Exact fractional capture modes survive audio/control saves and routing changes.
+        var selected_mode = new VideoMode(1920, 1080, 30000, 1001);
+        video.video_mode = selected_mode;
+        extended.save_video_mode(video);
+        extended.save_audio(camera);
+        extended.save_control(video, V4L2.BASE, -12);
+        var current_mode = new VideoMode(640, 480, 30, 1);
+        new_video.video_modes.append(current_mode);
+        new_video.video_modes.append(selected_mode);
+        new_video.video_mode = current_mode;
+        new Preferences(path).restore_video_mode(new_video);
+        assert(new_video.video_mode == selected_mode);
+        assert(new_video.video_mode.numerator == 30000);
+        assert(new_video.video_mode.denominator == 1001);
+
+        // Unavailable modes and malformed fractions retain the camera's current setting.
+        new_video.video_modes = new List<VideoMode>();
+        new_video.video_modes.append(current_mode);
+        new_video.video_mode = current_mode;
+        new Preferences(path).restore_video_mode(new_video);
+        assert(new_video.video_mode == current_mode);
+        new_video.video_modes.append(selected_mode);
+        contents.load_from_file(path, KeyFileFlags.NONE);
+        contents.set_integer("channel:" + Uri.escape_string(video.preference_id, null, false), "video-rate-denominator", 0);
+        contents.save_to_file(path);
+        new Preferences(path).restore_video_mode(new_video);
+        assert(new_video.video_mode == current_mode);
+
         FileUtils.unlink(path);
         DirUtils.remove(directory);
     }
@@ -735,6 +769,26 @@ private void test_camera_controls()
     }
 }
 
+/** Verify screen scaling choices and exact fractional caps without capture hardware. */
+private void test_video_modes()
+{
+    var screen = new Input("Screen", "desktop-screen");
+    screen.width = 3840;
+    screen.height = 2160;
+    VideoMode.probe(screen);
+    assert(screen.video_modes.length() == 21);
+    assert(screen.video_modes.nth_data(0).width == 3840);
+    assert(screen.video_modes.nth_data(7).width == 1920);
+    assert(screen.video_modes.nth_data(14).height == 540);
+    VideoMode.probe(screen);
+    assert(screen.video_modes.length() == 21);
+    var mode = new VideoMode(1920, 1080, 30000, 1001);
+    var caps = Gst.Caps.from_string(mode.caps());
+    int numerator, denominator;
+    assert(caps.get_structure(0).get_fraction("framerate", out numerator, out denominator));
+    assert(numerator == 30000 && denominator == 1001);
+}
+
 /** Register and run the Vala unit and synthetic recording integration checks. */
 int main(string[] args)
 {
@@ -742,6 +796,7 @@ int main(string[] args)
     Gst.init(ref args);
     Test.add_func("/studio/camera-framerate-callback", test_camera_framerate_callback);
     Test.add_func("/studio/camera-controls", test_camera_controls);
+    Test.add_func("/studio/video-modes", test_video_modes);
     Test.add_func("/studio/preferences", test_preferences);
     Test.add_func("/studio/level-rms", test_level_rms);
     Test.add_func("/studio/rolling-framerate", test_rates);
