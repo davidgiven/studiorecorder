@@ -71,6 +71,45 @@ private Gtk.Widget? find_toolbar(Gtk.Widget root)
     return null;
 }
 
+/** Locate a completed graph export without assuming timestamped file names. */
+private string? find_exported_graph(string directory)
+{
+    try
+    {
+        var graphs = Dir.open(directory);
+        string? name;
+        while ((name = graphs.read_name()) != null)
+            if (name.has_suffix(".node"))
+                return Path.build_filename(directory, name);
+    }
+    catch (FileError error)
+    {
+        GLib.error("%s", error.message);
+    }
+    return null;
+}
+
+/** Validate serialized GTK drawing nodes and their native GStreamer graph companion. */
+private void verify_graph_export(string path)
+{
+    try
+    {
+        string serialized;
+        FileUtils.get_contents(path, out serialized);
+        var node = Gsk.RenderNode.deserialize(new Bytes(serialized.data), null);
+        assert(node != null && node.get_bounds().get_width() > 0);
+
+        // Keep the original topology available for inspection in ordinary Graphviz viewers.
+        string topology;
+        FileUtils.get_contents(path.substring(0, path.length - 5) + ".dot", out topology);
+        assert(topology.contains("digraph") && topology.contains("audiotestsrc"));
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
 /** Check actual GTK selection and widget retention through format, audio, and take rebuilds. */
 private void test_preview_rebuild()
 {
@@ -144,6 +183,9 @@ private void test_preview_rebuild()
                     toolbar_height = toolbar.get_height();
                     transport_width = transport_text.get_width();
                     transport_height = transport_text.get_height();
+
+                    // Export a real live graph while subsequent capture rebuilds continue independently.
+                    assert(window.activate_action("window.export-graph", null));
 
                     // Choose a non-first source before changing its format through the actual widgets.
                     controls_view = (VideoControlsView) find_widget(window, typeof(VideoControlsView));
@@ -237,6 +279,12 @@ private void test_preview_rebuild()
                     case 6:
                         if (app.transport_state == TransportState.RECORDING)
                         {
+                            // The export must be a valid GTK node file with a genuine DOT companion.
+                            string? exported = find_exported_graph(directory);
+                            if (exported == null)
+                                return Source.CONTINUE;
+                            verify_graph_export(exported);
+
                             // Exit must finalize the active take through the regular shutdown path.
                             assert(window.activate_action("window.exit", null));
                             phase++;
@@ -256,7 +304,7 @@ private void test_preview_rebuild()
         string? name;
         while ((name = recordings.read_name()) != null)
         {
-            assert(name.has_suffix(".mkv"));
+            assert(name.has_suffix(".mkv") || name.has_suffix(".dot") || name.has_suffix(".node"));
             FileUtils.unlink(Path.build_filename(directory, name));
         }
         DirUtils.remove(directory);

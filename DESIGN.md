@@ -273,3 +273,21 @@ caps are read before the tee and meter conversion, so packed 24-bit and other
 native formats are reported accurately. Screen also lists independent computer
 audio when enabled and assigned a different microphone or No audio. Pending
 negotiation is shown explicitly rather than guessed from caps templates.
+
+Tools provides a live pipeline export via `Gst.Debug.bin_to_dot_data(ALL)`.
+`PipelineGraphExport` keeps the native DOT snapshot and asynchronously runs
+Graphviz to render a size-bounded PNG in memory. GTK embeds that static diagram
+in a serialized texture render node, which `gtk4-node-editor` can read. This is
+a rendered view of the GStreamer graph, not an editable mapping of pipeline
+elements to GSK nodes; the DOT companion preserves native topology. Both files
+use exclusive creation with timestamp/UUID names in the working directory.
+Graphviz rendering has a 15-second deadline and is cancelled on exit. Failures
+are reported in the toolbar without stopping an active take, and a DOT snapshot
+remains usable if rendering fails or Graphviz is missing. The display-dependent
+regression activates the Tools action during live capture, then checks GTK
+render-node deserialization and the native graph while recording transitions
+continue.
+
+GTK's [node editor](https://docs.gtk.org/gtk4/gtk4-node-editor.html) consumes
+render-node files; [Gsk.RenderNode serialization](https://docs.gtk.org/gsk4/method.RenderNode.write_to_file.html)
+provides that format.

@@ -113,3 +113,12 @@ Direct hardware capture can fail if another client, including PipeWire, holds
 the ALSA device. Release it before recording; StudioRecorder does not suspend
 other clients or silently fall back to converted capture. Native formats that
 Matroska cannot represent are reported as unsupported rather than transcoded.
+
+Tools → Export GStreamer graph for GTK Node Editor writes a timestamped `.node`
+diagram and native `.dot` topology in the working directory. Install Graphviz
+(`dot`) for rendering, then open the diagram with `gtk4-node-editor FILE.node`.
+The GTK file contains a rendered image of the pipeline; the companion DOT file
+retains GStreamer elements, links, states, properties, and negotiated caps for
+Graphviz viewers. Export works during preview or recording and does not rebuild
+the capture pipeline. If Graphviz is unavailable, the DOT snapshot is still
+saved and the toolbar reports the missing renderer.

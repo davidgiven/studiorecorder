@@ -352,6 +352,12 @@ public class Recorder : GLib.Object
         }
     }
 
+    /** Snapshot the current native graph, including element state, pad links, properties, and negotiated caps. */
+    public string graph_snapshot()
+    {
+        return Gst.Debug.bin_to_dot_data(pipeline, Gst.DebugGraphDetails.ALL);
+    }
+
     /** Describe negotiated capture PCM before meter conversion, including shared and monitor inputs. */
     public string audio_summary(Input? input)
     {

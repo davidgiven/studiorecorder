@@ -83,6 +83,8 @@ public class Application : GLib.Object
     private Gtk.Label fps_label;
     private Gtk.Label transport_label;
     private Gtk.Stack transport_status;
+    private SimpleAction? export_graph_action;
+    private Cancellable? graph_export_cancel;
     private Gtk.Label status_label;
     private Gtk.Button play_button;
     private Gtk.Button stop_button;
@@ -276,6 +278,10 @@ public class Application : GLib.Object
         var exit = new SimpleAction("exit", null);
         exit.activate.connect(() => request_exit());
         actions.add_action(exit);
+        export_graph_action = new SimpleAction("export-graph", null);
+        export_graph_action.set_enabled(false);
+        export_graph_action.activate.connect(() => export_pipeline_graph.begin());
+        actions.add_action(export_graph_action);
         window.insert_action_group("window", actions);
         window.insert_action_group("view", workspace.view_actions);
 
@@ -286,7 +292,38 @@ public class Application : GLib.Object
         var menu = new Menu();
         menu.append_submenu("_File", file);
         menu.append_submenu("_View", workspace.view_menu);
+        var tools = new Menu();
+        tools.append("Export GStreamer graph for GTK Node Editor", "window.export-graph");
+        menu.append_submenu("_Tools", tools);
         return new Gtk.PopoverMenuBar.from_model(menu);
+    }
+
+    /** Export one immutable pipeline snapshot without interrupting capture or recording. */
+    private async void export_pipeline_graph()
+    {
+        if (recorder == null || exiting || graph_export_cancel != null)
+            return;
+        string dot = recorder.graph_snapshot();
+        graph_export_cancel = new Cancellable();
+        export_graph_action.set_enabled(false);
+        status("Exporting GStreamer graph…");
+        try
+        {
+            string path = yield PipelineGraphExport.write(dot, Environment.get_current_dir(), graph_export_cancel);
+            if (!exiting)
+                status("Graph exported: " + path + " (native .dot alongside)");
+        }
+        catch (Error error)
+        {
+            // Export failures are diagnostic errors and must never terminate a take.
+            if (!exiting)
+                status("Graph export failed: " + error.message);
+        }
+        finally
+        {
+            graph_export_cancel = null;
+            export_graph_action.set_enabled(recorder != null && !exiting);
+        }
     }
 
     /** Present application information without interrupting an active capture or take. */
@@ -647,6 +684,8 @@ public class Application : GLib.Object
     {
         if (window == null)
             return;
+        if (export_graph_action != null)
+            export_graph_action.set_enabled(recorder != null && !exiting && graph_export_cancel == null);
         if (video_mode_panel != null)
             video_mode_panel.sensitive = state == TransportState.PAUSED && !exiting;
         play_button.sensitive = state == TransportState.PAUSED && !exiting && has_recording_channels();
@@ -1190,6 +1229,8 @@ public class Application : GLib.Object
         if (state == TransportState.CLOSED)
             return;
         exiting = true;
+        if (graph_export_cancel != null)
+            graph_export_cancel.cancel();
         if (recorder != null && recorder.recording)
             stop();
         else
