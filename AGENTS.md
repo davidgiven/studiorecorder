@@ -12,6 +12,8 @@ The UI has a large selected preview and clickable thumbnails with overlaid audio
 
 See [README.md](README.md) for dependencies, usage, and checks, and [DESIGN.md](DESIGN.md) for current architecture, validation limits, and future work. The implementation currently rebuilds capture pipelines at recording transitions and audio changes; per-channel audio selections, resolution/frame-rate selections, recording inclusion, V4L2 camera-control values, controls-pane width, and main-window geometry are saved in user preferences, while other saved settings, hotplug recovery, and seamless recording-branch transitions remain future work.
 
+Do not update README.md with changes to the design unless explicitly asked to.
+
 ## Source layout and native APIs
 
 Application sources and VAPI declarations live in `src/`. Put each major class in its own file named after the class; trivial helpers may stay beside their users. Application types live at the top level without a custom application namespace. Keep external bindings grouped in `Native` and `V4L2`.
