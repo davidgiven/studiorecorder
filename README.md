@@ -114,6 +114,16 @@ the ALSA device. Release it before recording; StudioRecorder does not suspend
 other clients or silently fall back to converted capture. Native formats that
 Matroska cannot represent are reported as unsupported rather than transcoded.
 
+File → Preferences sets the recording output directory and filename pattern.
+Changes are saved and apply to the next take. The default directory is the
+working directory; the default pattern is
+`StudioRecorder_%Y-%m-%d_%H-%M-%S_%f%z_{uuid}.mkv`.
+Patterns support local-time fields `%Y`, `%y`, `%m`, `%d`, `%H`, `%M`, `%S`,
+`%f` (microseconds), `%z` (UTC offset), `{uuid}`, and `%%` (literal percent).
+Use a filename ending in `.mkv`, without directory separators. The dialog shows
+an example and includes a folder picker. Existing names receive numeric suffixes;
+completed and partial takes are never overwritten.
+
 Tools → Export GStreamer graph for GTK Node Editor writes a timestamped `.node`
 diagram and native `.dot` topology in the working directory. Install Graphviz
 (`dot`) for rendering, then open the diagram with `gtk4-node-editor FILE.node`.

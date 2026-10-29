@@ -1,3 +1,63 @@
+/** Check saved destinations, date expansion, invalid patterns, and collision-safe reservations. */
+private void test_recording_output()
+{
+    try
+    {
+        string directory = DirUtils.make_tmp("studio-output-XXXXXX");
+        string path = Path.build_filename(directory, "preferences.ini");
+        var preferences = new Preferences(path);
+        var output = preferences.load_output();
+        assert(output.pattern == RecordingOutput.DEFAULT_PATTERN);
+        output.directory = directory;
+        output.pattern = "Take_%Y-%m-%d_%H-%M-%S_{uuid}.mkv";
+        var time = new DateTime.local(2026, 10, 29, 12, 34, 56);
+        assert(output.filename(time, "id") == "Take_2026-10-29_12-34-56_id.mkv");
+        preferences.save_output(output);
+        var restored = new Preferences(path).load_output();
+        assert(restored.directory == directory);
+        assert(restored.pattern == output.pattern);
+
+        // Constant names must skip both finished takes and reservations without modifying either.
+        output.pattern = "Take.mkv";
+        string existing = Path.build_filename(directory, "Take.mkv");
+        FileUtils.set_contents(existing, "original take");
+        string first = output.reserve();
+        string second = output.reserve();
+        assert(first == Path.build_filename(directory, "Take_1.mkv"));
+        assert(second == Path.build_filename(directory, "Take_2.mkv"));
+        string contents;
+        FileUtils.get_contents(existing, out contents);
+        assert(contents == "original take");
+
+        // Reject paths, unsupported directives, control characters, and non-Matroska filenames.
+        foreach (string invalid in new string[] { "../Take.mkv", "%D.mkv", "%n.mkv", "%.mkv", "Take\n.mkv", "Take.mp4", "" })
+        {
+            output.pattern = invalid;
+            bool rejected = false;
+            try
+            {
+                output.validate();
+            }
+            catch (Error error)
+            {
+                rejected = true;
+            }
+            assert(rejected);
+        }
+
+        // Remove only the isolated files created by this check.
+        FileUtils.unlink(first + ".partial");
+        FileUtils.unlink(second + ".partial");
+        FileUtils.unlink(existing);
+        FileUtils.unlink(path);
+        DirUtils.remove(directory);
+    }
+    catch (Error error)
+    {
+        GLib.error("%s", error.message);
+    }
+}
+
 /** Assert approximate equality for floating-point framerate calculations. */
 private void assert_near(double actual, double expected)
 {
@@ -124,14 +184,16 @@ private void test_encoded_rate()
     try
     {
         string directory = DirUtils.make_tmp("studio-vala-fps-XXXXXX");
-        Environment.set_current_dir(directory);
+        var output = new RecordingOutput();
+        output.directory = directory;
+        output.pattern = "Configured-take.mkv";
 
         // Construct a real recording pipeline with synthetic inputs and no rendering branch.
         var inputs = test_cameras();
         inputs.nth_data(2).input.video_mode = new VideoMode(320, 240, 30, 1);
         var required = new List<Input> ();
         required.append(inputs.nth_data(2).audio);
-        var recorder = new Recorder(true, false, true);
+        var recorder = new Recorder(true, false, true, output);
         recorder.build(inputs, required);
         recorder.start();
 
@@ -190,6 +252,7 @@ private void test_encoded_rate()
 
         // Finalization must replace the partial name with a completed recording.
         recorder.close(true);
+        assert(recorder.final_path == Path.build_filename(directory, "Configured-take.mkv"));
         assert(FileUtils.test(recorder.final_path, FileTest.EXISTS));
         assert(!FileUtils.test(recorder.partial_path, FileTest.EXISTS));
         FileUtils.unlink(recorder.final_path);
@@ -1093,6 +1156,7 @@ int main(string[] args)
     Test.add_func("/studio/camera-controls", test_camera_controls);
     Test.add_func("/studio/video-modes", test_video_modes);
     Test.add_func("/studio/preferences", test_preferences);
+    Test.add_func("/studio/recording-output", test_recording_output);
     Test.add_func("/studio/native-audio", test_native_audio);
     Test.add_func("/studio/alsa-discovery", test_alsa_discovery);
     Test.add_func("/studio/layout-preferences", test_layout_preferences);

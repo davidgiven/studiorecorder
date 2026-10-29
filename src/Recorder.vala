@@ -36,13 +36,15 @@ public class Recorder : GLib.Object
     private bool preview;
     private bool synthetic;
     private string? encoder;
+    private RecordingOutput output;
 
     /** Create an unbuilt pipeline for either live preview or one independently finalized take. */
-    public Recorder (bool recording, bool preview, bool synthetic)
+    public Recorder (bool recording, bool preview, bool synthetic, RecordingOutput? output = null)
     {
         this.recording = recording;
         this.preview = preview;
         this.synthetic = synthetic;
+        this.output = output ?? new RecordingOutput();
         pipeline = new Gst.Pipeline("studio-recorder");
     }
 
@@ -151,15 +153,8 @@ public class Recorder : GLib.Object
         if (recording)
         {
             encoder = choose_encoder(synthetic);
-            string stamp = new DateTime.now_local().format("%Y-%m-%d_%H-%M-%S_%f%z");
-            final_path = Path.build_filename(
-                /* first_element= */ Environment.get_current_dir(),
-                /* path_component= */ "StudioRecorder_%s_%s.mkv".printf(stamp, Uuid.string_random()));
+            final_path = output.reserve();
             partial_path = final_path + ".partial";
-
-            // Exclusive reservation; never truncate a pre-existing take.
-            var reserved = File.new_for_path(partial_path).create(FileCreateFlags.NONE);
-            reserved.close();
             mux = make("matroskamux");
             // Streaming Matroska stays readable without a final duration/index trailer.
             mux.set(

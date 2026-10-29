@@ -23,6 +23,37 @@ public class Preferences : GLib.Object
         }
     }
 
+    /** Restore output naming independently of per-channel preferences. */
+    public RecordingOutput load_output()
+    {
+        var output = new RecordingOutput();
+        try
+        {
+            output.directory = settings.get_string("recording", "directory");
+        }
+        catch (KeyFileError error)
+        {
+            // An unset directory retains the process working directory.
+        }
+        try
+        {
+            output.pattern = settings.get_string("recording", "filename-pattern");
+        }
+        catch (KeyFileError error)
+        {
+            // An unset pattern retains timestamped UUID filenames.
+        }
+        return output;
+    }
+
+    /** Save recording destinations without replacing channel or window settings. */
+    public void save_output(RecordingOutput output)
+    {
+        settings.set_string("recording", "directory", output.directory);
+        settings.set_string("recording", "filename-pattern", output.pattern);
+        save();
+    }
+
     /** Normalize desktop capture and prefer persistent hardware identities over routing identities. */
     private static string source_key(Input input)
     {

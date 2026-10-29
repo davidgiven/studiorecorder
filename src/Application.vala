@@ -56,6 +56,8 @@ public class Application : GLib.Object
     private MainLoop loop = new MainLoop();
     private Registry registry = new Registry();
     private Preferences? preferences;
+    private RecordingOutput output = new RecordingOutput();
+    private PreferencesDialog? preferences_dialog;
     private WindowGeometry geometry = new WindowGeometry();
     private VideoControlsView? controls_view;
     private DesktopCapture? desktop;
@@ -120,7 +122,10 @@ public class Application : GLib.Object
         if (preferences == null && !synthetic)
             preferences = new Preferences();
         if (preferences != null)
+        {
             geometry = preferences.load_window_geometry();
+            output = preferences.load_output();
+        }
         if (!headless)
             create_window();
     }
@@ -272,6 +277,9 @@ public class Application : GLib.Object
     private Gtk.Widget create_menu_bar(RecordingWorkspace workspace)
     {
         var actions = new SimpleActionGroup();
+        var preferences_action = new SimpleAction("preferences", null);
+        preferences_action.activate.connect(() => show_preferences());
+        actions.add_action(preferences_action);
         var about = new SimpleAction("about", null);
         about.activate.connect(() => show_about());
         actions.add_action(about);
@@ -287,6 +295,7 @@ public class Application : GLib.Object
 
         // Property-backed View actions stay checked when dock visibility changes elsewhere.
         var file = new Menu();
+        file.append("_Preferences…", "window.preferences");
         file.append("_About", "window.about");
         file.append("E_xit", "window.exit");
         var menu = new Menu();
@@ -324,6 +333,29 @@ public class Application : GLib.Object
             graph_export_cancel = null;
             export_graph_action.set_enabled(recorder != null && !exiting);
         }
+    }
+
+    /** Present one preferences window and apply accepted changes to subsequent takes. */
+    private void show_preferences()
+    {
+        if (preferences_dialog == null)
+        {
+            preferences_dialog = new PreferencesDialog(window, output);
+            preferences_dialog.accepted.connect(
+                /* handler= */ (updated) =>
+                {
+                    output = updated;
+                    if (preferences != null)
+                        preferences.save_output(output);
+                });
+            preferences_dialog.close_request.connect(
+                /* handler= */ () =>
+                {
+                    preferences_dialog = null;
+                    return false;
+                });
+        }
+        preferences_dialog.present();
     }
 
     /** Present application information without interrupting an active capture or take. */
@@ -569,7 +601,7 @@ public class Application : GLib.Object
                 recorder = null;
             }
             set_state(recording ? TransportState.STARTING : TransportState.PREPARING);
-            recorder = new Recorder(recording, !headless, synthetic);
+            recorder = new Recorder(recording, !headless, synthetic, output);
             recorder.build(cameras, required_audio);
 
             // Observe readiness and errors on the main loop before starting the graph.
